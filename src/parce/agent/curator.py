@@ -1,8 +1,12 @@
-"""Factory for the PARCE bioinformatics curator agent.
+"""Factory for the PARCE narrative agent.
 
 Uses ``AzureAIAgentClient`` (Azure AI Foundry provider) so any model
-deployed in your Foundry project can be used -- Mistral, GPT-4o,
+deployed in your Foundry project can be used -- GPT-4o, Mistral,
 DeepSeek, Llama, etc. -- by changing a single env var.
+
+In the hybrid architecture the agent's sole job is to generate an
+experimental narrative from provided context.  All tool calling and
+KG construction happens in Python.
 """
 
 from __future__ import annotations
@@ -14,24 +18,18 @@ from agent_framework import Agent
 from agent_framework.azure import AzureAIAgentClient
 from azure.identity.aio import AzureCliCredential
 
-from parce.agent.prompts import CURATOR_INSTRUCTIONS
+from parce.agent.prompts import NARRATIVE_INSTRUCTIONS
 from parce.config.settings import Settings
-from parce.tools.geo_fetcher import fetch_geo_metadata
 
 
 @asynccontextmanager
-async def create_curator_agent(
+async def create_narrative_agent(
     settings: Settings | None = None,
 ) -> AsyncIterator[Agent]:
-    """Build and yield an Agent configured as a bioinformatics curator.
+    """Build and yield an Agent configured as a narrative writer.
 
-    This is an async context manager because the Foundry client and
-    credential need proper cleanup on exit.
-
-    The agent is returned *without* a baked-in ``response_format`` so
-    callers can pass it at ``agent.run()`` time, e.g.::
-
-        result = await agent.run(query, options={"response_format": ExperimentNarrative})
+    The agent receives publication abstract + structured ontology context
+    and returns a ``NarrativeOutput`` via ``response_format``.
 
     Parameters
     ----------
@@ -42,7 +40,7 @@ async def create_curator_agent(
     Yields
     ------
     Agent
-        A ready-to-run agent wired with the GEO fetcher tool.
+        A ready-to-run agent that produces a narrative string.
     """
     if settings is None:
         settings = Settings()
@@ -55,8 +53,7 @@ async def create_curator_agent(
             credential=credential,
         ).as_agent(
             name="PARCE",
-            instructions=CURATOR_INSTRUCTIONS,
-            tools=[fetch_geo_metadata],
+            instructions=NARRATIVE_INSTRUCTIONS,
         ) as agent,
     ):
         yield agent

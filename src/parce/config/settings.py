@@ -16,3 +16,4 @@ class Settings(BaseSettings):
 
     azure_ai_project_endpoint: str
     azure_ai_model_deployment_name: str = "mistral-large"
+    max_retries: int = 3

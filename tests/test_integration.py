@@ -44,10 +44,10 @@ class TestAzureCredential:
 class TestAgentCreation:
     """Verify the agent can be created against the live Foundry project."""
 
-    async def test_create_curator_agent(self):
-        """The curator agent context manager yields a usable Agent."""
-        from parce.agent.curator import create_curator_agent
+    async def test_create_narrative_agent(self):
+        """The narrative agent context manager yields a usable Agent."""
+        from parce.agent.curator import create_narrative_agent
 
-        async with create_curator_agent() as agent:
+        async with create_narrative_agent() as agent:
             assert agent is not None
             assert agent.name == "PARCE"
