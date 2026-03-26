@@ -1,0 +1,47 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=64", "wheel"]
+
+[project]
+name = "parce"
+version = "0.1.0"
+description = "Programmable Agent for Retrieving Contextualized Experiments"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = "MIT"
+dependencies = [
+    "agent-framework>=1.0.0rc5",
+    "agent-framework-azure-ai>=1.0.0rc5",
+    "azure-ai-projects>=2.0.1",
+    "azure-identity>=1.25.3",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.13.1",
+    "python-dotenv>=1.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[project.scripts]
+parce = "parce.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv]
+prerelease = "if-necessary-or-explicit"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: requires Azure credentials and a live Foundry project (deselect with '-m \"not integration\"')",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
