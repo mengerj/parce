@@ -2,7 +2,7 @@
 
 **Programmable Agent for Retrieving Contextualized Experiments**
 
-PARCE is an agentic workflow that fetches public omics data (starting with T-cell transcriptomics from NCBI GEO) and produces structured JSON narratives describing how the data was obtained. Each narrative interleaves human-readable descriptions with URI references to raw data files, making it suitable for training multimodal autoregressive embedding models.
+PARCE is an agentic workflow that fetches public omics data and produces structured JSON narratives describing how the data was obtained. Each narrative interleaves human-readable descriptions with URI references to raw data files, making it suitable for training multimodal autoregressive embedding models.
 
 ## Architecture
 
