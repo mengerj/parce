@@ -36,9 +36,13 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
   the `NarrativeOutput` schema, and the step-2 block in `main.py`). Drop
   cell-type extraction. Remove the `parce.tools.*` mypy exemption as those
   modules move under `sources/`. *(Next up.)*
-- [ ] **PR 4 — Ontology resolver.** Shared `ontology/` stage: free-text →
-  UBERON/MONDO/assay IDs (deterministic OLS/text2term + on-disk cache), LLM
-  fallback for hard cases. Wire into normalizers.
+- [ ] **PR 4 — Ontology resolver.** Shared `ontology/` stage (see ARCHITECTURE
+  §5). Pin the **facet → ontology registry** as a constant (EFO, UBERON, MONDO,
+  NCBITaxon, ChEBI, PSI-MS, EDAM). Implement free-text → term resolution
+  (OLS4 REST + text2term/Zooma, on-disk cache; LLM fallback) and the
+  **`molecular_layer` derivation** (walk EFO `is-a` ancestors to anchor classes).
+  Decide the anchor set + the no-anchor default. Wire into normalizers. Resolve
+  IDs at runtime via OLS — do not hardcode term IDs.
 - [ ] **PR 5 — GEO extraction agent (vertical slice).** GEO adapter
   (E-utilities/GEOparse) + Azure extraction normalizer emitting the canonical
   schema via `response_format`; extract sample covariates from
@@ -101,6 +105,23 @@ what the next session should know. Keep entries short and factual.
 - Gates green locally (incl. hermetic run with no `.env`): ruff check, ruff
   format --check, mypy (16 files), **52 unit tests** pass. No dep changes.
 - **Next session:** PR 3 (source-adapter interface + rip out the narrative path).
+
+### 2026-06-23 — Ontology grounding (docs)
+- Decision: every experiment facet binds to one designated ontology (EFO assay,
+  UBERON tissue, MONDO disease, NCBITaxon organism, ChEBI/gene-ID perturbation,
+  PSI-MS for MS proteomics, EDAM data format). Registry will live in
+  `parce/ontology/`.
+- Decision: **no free-text `modality` long-term.** Store `assay` (EFO term ID) +
+  a coarse `molecular_layer` enum derived by walking EFO `is-a` ancestors — both
+  controlled. PR 2 shipped with a `modality` field; this refinement now lands in
+  **PR 4** (see ARCHITECTURE §4–5).
+- Decision: resolve term IDs at runtime via OLS4 (+ text2term/Zooma, LLM
+  fallback); never hardcode IDs. Follow SDRF/MAGE-TAB conventions for the record.
+- Added ARCHITECTURE §5 (Ontology grounding; later sections renumbered) and
+  sharpened ROADMAP PR 4 (registry + lineage derivation + anchor-set open
+  question). Docs only, no code change.
+- Authored on the foundations branch and merged on top of PR 2 / PR 3.
+  **Next up: PR 3.**
 
 ### 2026-06-23 — PR 1: Foundations & tooling
 - Branch `restructure-context-metadata` off `main` (post-cxg-merge).
