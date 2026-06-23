@@ -1,8 +1,14 @@
-"""Deterministic Knowledge Graph construction from tool outputs + LLM narrative.
+"""Deterministic Knowledge Graph construction from CELLxGENE + paper metadata.
 
-The LLM only generates the ``experimental_narrative``.  All other nodes
-and edges are assembled programmatically from the structured data returned
-by the CELLxGENE and EuropePMC tools.
+This is the CELLxGENE ingestion path: it assembles canonical nodes and edges
+programmatically from the structured data returned by the CELLxGENE and
+EuropePMC tools. No LLM is involved. (It is slated to become a proper
+``SourceAdapter``/``Normalizer`` in PR 3 — see docs/ROADMAP.md.)
+
+``CellType`` is intentionally not extracted: it is a data-inferred annotation,
+not an experiment-design variable. CELLxGENE Census is dataset-level, so no
+``SampleNode`` records are emitted here yet (see ARCHITECTURE.md, open question
+on sample granularity).
 """
 
 from __future__ import annotations
@@ -15,22 +21,26 @@ from parce.models.graph_schema import (
     EntityType,
     GraphEdge,
     KnowledgeGraphOutput,
-    PublicationNode,
+    StudyNode,
 )
 from parce.tools.cellxgene_fetcher import _ORGANISM_ONTOLOGY
 
 logger = logging.getLogger(__name__)
 
+# Provenance + high-level modality for everything built by this path.
+_SOURCE = "CELLxGENE"
+_STUDY_MODALITY = "scRNA-seq"
+
+# Ontology categories from CELLxGENE that become design-context entities. Cell
+# types are deliberately omitted (data-inferred → leakage).
 _CATEGORY_TO_ENTITY_TYPE: dict[str, EntityType] = {
-    "cell_types": EntityType.CELL_TYPE,
     "tissues": EntityType.TISSUE,
     "diseases": EntityType.DISEASE,
     "assays": EntityType.ASSAY,
 }
 
 _CATEGORY_TO_RELATION: dict[str, str] = {
-    "cell_types": "MEASURES",
-    "tissues": "MEASURES",
+    "tissues": "HAS_TISSUE",
     "diseases": "HAS_CONDITION",
     "assays": "MEASURED_WITH",
 }
@@ -39,27 +49,24 @@ _CATEGORY_TO_RELATION: dict[str, str] = {
 def build_knowledge_graph(
     paper_data: dict,
     cellxgene_data: dict,
-    narrative: str,
 ) -> KnowledgeGraphOutput:
-    """Assemble a complete ``KnowledgeGraphOutput`` from structured data.
+    """Assemble a canonical ``KnowledgeGraphOutput`` from structured data.
 
     Parameters
     ----------
     paper_data:
-        Dict with keys ``doi``, ``title``, ``abstract`` (from ``fetch_paper_metadata``).
+        Dict with keys ``doi``, ``title`` (from ``fetch_paper_metadata``).
     cellxgene_data:
         Dict with key ``datasets`` containing per-dataset metadata and
         ontology summaries (from ``fetch_cellxgene_datasets``).
-    narrative:
-        The LLM-generated experimental narrative string.
     """
-    doi = paper_data["doi"]
+    study_id = paper_data["doi"]
 
-    publication = PublicationNode(
-        doi=doi,
+    study = StudyNode(
+        study_id=study_id,
         title=paper_data.get("title", ""),
-        abstract=paper_data.get("abstract", ""),
-        experimental_narrative=narrative,
+        source=_SOURCE,
+        modality=_STUDY_MODALITY,
     )
 
     datasets: list[DatasetNode] = []
@@ -73,8 +80,8 @@ def build_knowledge_graph(
         datasets.append(
             DatasetNode(
                 dataset_id=dataset_id,
-                uri=ds["h5ad_uri"],
-                modality=ds.get("modality", "unknown"),
+                data_uri=ds["h5ad_uri"],
+                assay=ds.get("modality", "unknown"),
                 cell_count=ds["cell_count"],
             )
         )
@@ -82,7 +89,7 @@ def build_knowledge_graph(
         edges.append(
             GraphEdge(
                 source_id=dataset_id,
-                target_id=doi,
+                target_id=study_id,
                 relation_type="EXTRACTED_FROM",
             )
         )
@@ -100,7 +107,7 @@ def build_knowledge_graph(
                 name=name,
             )
 
-        # Register entities and create edges per category
+        # Register entities and create edges per design-context category
         for category, entity_type in _CATEGORY_TO_ENTITY_TYPE.items():
             relation = _CATEGORY_TO_RELATION[category]
             for term in ontology.get(category, []):
@@ -122,28 +129,30 @@ def build_knowledge_graph(
                     )
                 )
 
-    # Publication -> Species edges
-    for ont_id in species_seen:
-        resolved_id = _ORGANISM_ONTOLOGY[ont_id][0] if ont_id in _ORGANISM_ONTOLOGY else ont_id
+    # Study -> Species edges
+    for organism_key in species_seen:
+        species_id = _ORGANISM_ONTOLOGY[organism_key][0]
         edges.append(
             GraphEdge(
-                source_id=doi,
-                target_id=resolved_id,
+                source_id=study_id,
+                target_id=species_id,
                 relation_type="STUDIES",
             )
         )
 
     kg = KnowledgeGraphOutput(
-        publications=[publication],
+        studies=[study],
         datasets=datasets,
+        samples=[],
         biological_entities=list(entity_registry.values()),
         edges=edges,
     )
 
     logger.info(
-        "Built KG: publications=%d datasets=%d entities=%d edges=%d",
-        len(kg.publications),
+        "Built KG: studies=%d datasets=%d samples=%d entities=%d edges=%d",
+        len(kg.studies),
         len(kg.datasets),
+        len(kg.samples),
         len(kg.biological_entities),
         len(kg.edges),
     )
