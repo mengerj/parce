@@ -13,7 +13,6 @@ import pytest
 
 from parce.main import _build_narrative_prompt, run
 
-
 _MOCK_PAPER = {
     "doi": "10.1234/mock",
     "title": "Mock Study",
@@ -98,6 +97,7 @@ class TestRunOrchestration:
         assert out_file.exists()
 
         import json
+
         kg = json.loads(out_file.read_text())
         assert len(kg["publications"]) == 1
         assert kg["publications"][0]["doi"] == "10.1234/mock"

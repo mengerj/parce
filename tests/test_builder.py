@@ -5,7 +5,6 @@ from __future__ import annotations
 from parce.graph.builder import build_knowledge_graph
 from parce.models.graph_schema import EntityType
 
-
 _PAPER_DATA = {
     "doi": "10.1234/test",
     "title": "Test Study",
@@ -148,5 +147,6 @@ class TestBuildKnowledgeGraph:
         kg = build_knowledge_graph(_PAPER_DATA, _CELLXGENE_DATA, _NARRATIVE)
         json_str = kg.model_dump_json()
         from parce.models.graph_schema import KnowledgeGraphOutput
+
         restored = KnowledgeGraphOutput.model_validate_json(json_str)
         assert restored == kg

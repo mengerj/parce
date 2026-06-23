@@ -72,7 +72,10 @@ def _summarise_ontology_terms(census, dataset_id: str) -> dict:
             elapsed = time.perf_counter() - t0
             logger.info(
                 "Census obs loaded dataset_id=%s organism=%s rows=%d (%.2fs)",
-                dataset_id, organism, len(obs), elapsed,
+                dataset_id,
+                organism,
+                len(obs),
+                elapsed,
             )
             if obs.empty:
                 continue
@@ -92,7 +95,9 @@ def _summarise_ontology_terms(census, dataset_id: str) -> dict:
             last_error = f"{type(exc).__name__}: {exc}"
             logger.info(
                 "Failed get_obs for dataset_id=%s organism=%s (%s)",
-                dataset_id, organism, last_error,
+                dataset_id,
+                organism,
+                last_error,
             )
             continue
 
@@ -119,7 +124,8 @@ def _process_single_dataset(census, row) -> dict:
         h5ad_uri = uri_info["uri"]
         logger.info(
             "Resolved H5AD URI dataset_id=%s (%.2fs)",
-            dataset_id, time.perf_counter() - t_uri,
+            dataset_id,
+            time.perf_counter() - t_uri,
         )
     except Exception:
         h5ad_uri = f"s3://cellxgene-data-public/cell-census/h5ads/{dataset_id}.h5ad"
@@ -151,7 +157,8 @@ def fetch_cellxgene_datasets(doi: str, *, max_workers: int = 4) -> dict:
         datasets_df = census["census_info"]["datasets"].read().concat().to_pandas()
         logger.info(
             "Loaded Census datasets table rows=%d (%.2fs)",
-            len(datasets_df), time.perf_counter() - t0,
+            len(datasets_df),
+            time.perf_counter() - t0,
         )
         matched = datasets_df[datasets_df["collection_doi"] == doi]
 
@@ -160,7 +167,9 @@ def fetch_cellxgene_datasets(doi: str, *, max_workers: int = 4) -> dict:
             return {"doi": doi, "datasets": [], "error": f"No datasets found for DOI {doi}"}
 
         total = len(matched)
-        logger.info("Matched DOI=%s datasets=%d, processing with %d workers", doi, total, max_workers)
+        logger.info(
+            "Matched DOI=%s datasets=%d, processing with %d workers", doi, total, max_workers
+        )
 
         rows = [row for _, row in matched.iterrows()]
 
@@ -180,7 +189,9 @@ def fetch_cellxgene_datasets(doi: str, *, max_workers: int = 4) -> dict:
 
         logger.info(
             "CELLxGENE fetch complete DOI=%s datasets=%d total_time=%.2fs",
-            doi, len(results), time.perf_counter() - t_all,
+            doi,
+            len(results),
+            time.perf_counter() - t_all,
         )
         return {"doi": doi, "datasets": results}
     finally:

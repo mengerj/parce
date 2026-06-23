@@ -11,8 +11,8 @@ KG construction happens in Python.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from agent_framework import Agent
 from agent_framework.azure import AzureAIAgentClient

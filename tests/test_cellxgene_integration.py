@@ -68,7 +68,6 @@ class TestCellxgeneFetcherCore:
     async def test_modality_populated(self):
         payload = fetch_cellxgene_datasets(_TEST_DOI)
         any_modality = any(
-            ds.get("modality") and ds["modality"] != "unknown"
-            for ds in payload["datasets"]
+            ds.get("modality") and ds["modality"] != "unknown" for ds in payload["datasets"]
         )
         assert any_modality, "At least one dataset should have a known modality"

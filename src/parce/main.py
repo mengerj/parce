@@ -44,14 +44,13 @@ def _is_transient(exc: BaseException) -> bool:
     if isinstance(exc, _TRANSIENT_EXCEPTIONS):
         return True
     from azure.core.exceptions import HttpResponseError
-    if isinstance(exc, HttpResponseError) and exc.status_code in _TRANSIENT_STATUS_CODES:
-        return True
-    return False
+
+    return isinstance(exc, HttpResponseError) and exc.status_code in _TRANSIENT_STATUS_CODES
 
 
 def _backoff_delay(attempt: int) -> float:
     """Exponential backoff with full jitter."""
-    delay = min(_BASE_DELAY * (2 ** attempt), _MAX_DELAY)
+    delay = min(_BASE_DELAY * (2**attempt), _MAX_DELAY)
     return random.uniform(0, delay)
 
 
@@ -68,7 +67,9 @@ def _build_narrative_prompt(paper_data: dict, cellxgene_data: dict) -> str:
         lines.append(f"\n## CELLxGENE Datasets ({len(datasets)} total)")
         for ds in datasets:
             ontology = ds.get("ontology_summary", {})
-            parts = [f"- **{ds['dataset_id']}**: {ds.get('modality', '?')}, {ds['cell_count']:,} cells"]
+            parts = [
+                f"- **{ds['dataset_id']}**: {ds.get('modality', '?')}, {ds['cell_count']:,} cells"
+            ]
             for category in ("cell_types", "tissues", "diseases", "assays"):
                 terms = ontology.get(category, [])
                 if terms:
@@ -177,7 +178,10 @@ async def run(doi: str = _DEFAULT_DOI) -> None:
                     delay = _backoff_delay(attempt)
                     logger.warning(
                         "Transient error on attempt %d/%d, retrying in %.1fs: %s",
-                        attempt + 1, settings.max_retries, delay, exc,
+                        attempt + 1,
+                        settings.max_retries,
+                        delay,
+                        exc,
                     )
                     await asyncio.sleep(delay)
                     continue

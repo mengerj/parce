@@ -70,18 +70,22 @@ def build_knowledge_graph(
     for ds in cellxgene_data.get("datasets", []):
         dataset_id = ds["dataset_id"]
 
-        datasets.append(DatasetNode(
-            dataset_id=dataset_id,
-            uri=ds["h5ad_uri"],
-            modality=ds.get("modality", "unknown"),
-            cell_count=ds["cell_count"],
-        ))
+        datasets.append(
+            DatasetNode(
+                dataset_id=dataset_id,
+                uri=ds["h5ad_uri"],
+                modality=ds.get("modality", "unknown"),
+                cell_count=ds["cell_count"],
+            )
+        )
 
-        edges.append(GraphEdge(
-            source_id=dataset_id,
-            target_id=doi,
-            relation_type="EXTRACTED_FROM",
-        ))
+        edges.append(
+            GraphEdge(
+                source_id=dataset_id,
+                target_id=doi,
+                relation_type="EXTRACTED_FROM",
+            )
+        )
 
         ontology = ds.get("ontology_summary", {})
 
@@ -110,23 +114,24 @@ def build_knowledge_graph(
                         name=name,
                     )
 
-                edges.append(GraphEdge(
-                    source_id=dataset_id,
-                    target_id=ont_id,
-                    relation_type=relation,
-                ))
+                edges.append(
+                    GraphEdge(
+                        source_id=dataset_id,
+                        target_id=ont_id,
+                        relation_type=relation,
+                    )
+                )
 
     # Publication -> Species edges
     for ont_id in species_seen:
-        if ont_id in _ORGANISM_ONTOLOGY:
-            resolved_id = _ORGANISM_ONTOLOGY[ont_id][0]
-        else:
-            resolved_id = ont_id
-        edges.append(GraphEdge(
-            source_id=doi,
-            target_id=resolved_id,
-            relation_type="STUDIES",
-        ))
+        resolved_id = _ORGANISM_ONTOLOGY[ont_id][0] if ont_id in _ORGANISM_ONTOLOGY else ont_id
+        edges.append(
+            GraphEdge(
+                source_id=doi,
+                target_id=resolved_id,
+                relation_type="STUDIES",
+            )
+        )
 
     kg = KnowledgeGraphOutput(
         publications=[publication],
@@ -137,7 +142,9 @@ def build_knowledge_graph(
 
     logger.info(
         "Built KG: publications=%d datasets=%d entities=%d edges=%d",
-        len(kg.publications), len(kg.datasets),
-        len(kg.biological_entities), len(kg.edges),
+        len(kg.publications),
+        len(kg.datasets),
+        len(kg.biological_entities),
+        len(kg.edges),
     )
     return kg
