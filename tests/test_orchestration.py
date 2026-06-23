@@ -109,9 +109,10 @@ class TestRunOrchestration:
         import json
 
         kg = json.loads(out_file.read_text())
-        assert len(kg["publications"]) == 1
-        assert kg["publications"][0]["doi"] == "10.1234/mock"
-        assert kg["publications"][0]["experimental_narrative"] == "A mock narrative about T cells."
+        assert len(kg["studies"]) == 1
+        assert kg["studies"][0]["study_id"] == "10.1234/mock"
+        # The canonical KG no longer stores a narrative.
+        assert "experimental_narrative" not in kg["studies"][0]
         assert len(kg["datasets"]) == 1
         assert len(kg["biological_entities"]) > 0
         assert len(kg["edges"]) > 0

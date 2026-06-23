@@ -8,10 +8,14 @@ protocol and [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## ▶ Next up
 
-**PR 2 — Canonical KG schema refactor.** Introduce the source-agnostic schema
-(`StudyNode`, `DatasetNode`, `SampleNode`, `BiologicalEntityNode`, `GraphEdge`),
-reintroduce sample-level covariates, and **remove the narrative field and the
-CellType entity**. Migrate `graph/builder.py` and tests. No new source yet.
+**PR 3 — Source-adapter interface + cheap CELLxGENE adapter.** Define
+`SourceAdapter` / `Normalizer` protocols in `sources/` + `normalize/`. Refactor
+CELLxGENE into a deterministic adapter. **Remove the LLM/Azure narrative path
+entirely** (delete `agent/prompts.py` narrative role, `models/narrative.py`, the
+narrative `NarrativeOutput` schema in `models/graph_schema.py`, and step 2 of
+`main.py` — `_build_narrative_prompt`, the agent call, and the now-unused
+`narrative` variable). Drop cell-type extraction. Remove the `parce.tools.*`
+mypy exemption as those modules move under `sources/`.
 
 ---
 
@@ -22,15 +26,16 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 - [x] **PR 1 — Foundations & tooling.** CLAUDE.md, docs (architecture, roadmap,
   session prompt), GitHub Actions CI (ruff, mypy, pytest), ruff rule set + mypy
   config in `pyproject.toml`, code formatted to baseline. No behavior change.
-- [ ] **PR 2 — Canonical KG schema.** Source-agnostic nodes/edges; add
+- [x] **PR 2 — Canonical KG schema.** Source-agnostic nodes/edges; add
   `SampleNode` with design covariates; drop `experimental_narrative` and
-  `CellType`. Migrate builder + tests. *(Next up.)*
+  `CellType`. Migrate builder + tests.
 - [ ] **PR 3 — Source-adapter interface + cheap CELLxGENE adapter.** Define
   `SourceAdapter` / `Normalizer` protocols in `sources/` + `normalize/`. Refactor
   CELLxGENE into a deterministic adapter. **Remove the LLM/Azure narrative path
   entirely** (delete `agent/prompts.py` narrative role, `models/narrative.py`,
-  the step-2 block in `main.py`). Drop cell-type extraction. Remove the
-  `parce.tools.*` mypy exemption as those modules move under `sources/`.
+  the `NarrativeOutput` schema, and the step-2 block in `main.py`). Drop
+  cell-type extraction. Remove the `parce.tools.*` mypy exemption as those
+  modules move under `sources/`. *(Next up.)*
 - [ ] **PR 4 — Ontology resolver.** Shared `ontology/` stage: free-text →
   UBERON/MONDO/assay IDs (deterministic OLS/text2term + on-disk cache), LLM
   fallback for hard cases. Wire into normalizers.
@@ -62,6 +67,40 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
+
+### 2026-06-23 — PR 2: Canonical KG schema
+
+- Branch `pr2-canonical-kg-schema` off `main`.
+- Rewrote `models/graph_schema.py` to the source-agnostic canonical schema:
+  - `PublicationNode` → **`StudyNode`** (`study_id`, `title`, `source`,
+    `modality`); dropped `abstract` and `experimental_narrative`. Raw free text
+    belongs to the future `RawRecord`, not the canonical node.
+  - `DatasetNode`: `uri`→`data_uri`, `modality`→`assay`; no parent-study field.
+  - **`SampleNode`** added (design covariates only: `condition`, `perturbation`,
+    `timepoint`, `subject`, `organism`, `data_uri`; all optional). Not populated
+    by the CELLxGENE path yet (Census is dataset-level — see ARCHITECTURE §6).
+  - `EntityType`: **`CellType` removed** (data-inferred → leakage).
+  - `KnowledgeGraphOutput.publications` → `studies`; added `samples`.
+- Migrated `graph/builder.py`: signature is now
+  `build_knowledge_graph(paper_data, cellxgene_data)` (no `narrative`); emits
+  `StudyNode`/`DatasetNode`; ignores input `cell_types`; tissue→`HAS_TISSUE`,
+  disease→`HAS_CONDITION`, assay→`MEASURED_WITH`, study→species `STUDIES`.
+  `source="CELLxGENE"`, study `modality="scRNA-seq"` (constants for this path).
+- Decision: **containment is edge-only.** `DatasetNode` does not store its parent
+  `study_id`; the `EXTRACTED_FROM` edge is the single source of truth (avoids a
+  denormalized FK that can drift). Recorded in ARCHITECTURE §4.
+- `main.py`: step 3 drops the `narrative` arg; summary prints `Studies`/`Samples`.
+  **Deferred to PR 3 (not done here):** step 2 still generates the narrative via
+  Azure, but its output is now discarded (a comment marks this). `NarrativeOutput`
+  stays in `graph_schema.py` and `_build_narrative_prompt` still references
+  `cell_types` — both are part of the narrative path PR 3 deletes wholesale.
+- Updated tests: `test_graph_schema.py`, `test_builder.py`, `test_orchestration.py`
+  (asserts `studies`/`study_id`, no narrative, cell-type exclusion, sample
+  covariates, tissue dedup). `models/narrative.py` + `test_models.py` untouched
+  (legacy GEO agent schema; PR 3/PR 5 territory).
+- Gates green locally (incl. hermetic run with no `.env`): ruff check, ruff
+  format --check, mypy (16 files), **52 unit tests** pass. No dep changes.
+- **Next session:** PR 3 (source-adapter interface + rip out the narrative path).
 
 ### 2026-06-23 — PR 1: Foundations & tooling
 - Branch `restructure-context-metadata` off `main` (post-cxg-merge).

@@ -193,14 +193,18 @@ async def run(doi: str = _DEFAULT_DOI) -> None:
         return
 
     # ------------------------------------------------------------------
-    # Step 3: Build the Knowledge Graph programmatically
+    # Step 3: Build the canonical Knowledge Graph programmatically
     # ------------------------------------------------------------------
+    # NOTE: the canonical KG no longer stores a narrative. The narrative step
+    # above is retained only until PR 3 removes the LLM/Azure path entirely
+    # (see docs/ROADMAP.md); its output is intentionally not fed into the KG.
     logger.info("Step 3/3: Assembling knowledge graph")
-    kg = build_knowledge_graph(paper_data, cellxgene_data, narrative)
+    kg = build_knowledge_graph(paper_data, cellxgene_data)
 
     print("Knowledge graph constructed successfully:")
-    print(f"  Publications:        {len(kg.publications)}")
+    print(f"  Studies:             {len(kg.studies)}")
     print(f"  Datasets:            {len(kg.datasets)}")
+    print(f"  Samples:             {len(kg.samples)}")
     print(f"  Biological entities: {len(kg.biological_entities)}")
     print(f"  Edges:               {len(kg.edges)}")
 

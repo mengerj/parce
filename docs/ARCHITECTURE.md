@@ -87,22 +87,33 @@ modality is wanted before proteomics.)
   land on the same IDs or the graph won't link. Deterministic resolvers are
   tried first (OLS, text2term); the LLM is a fallback for ambiguous strings.
 
-## 4. Canonical KG schema (target)
+## 4. Canonical KG schema
 
-Source-agnostic nodes (Pydantic v2, `extra="forbid"`):
+Source-agnostic nodes (Pydantic v2, `extra="forbid"`). Implemented in PR 2 in
+`models/graph_schema.py`:
 
 - `StudyNode` — `study_id` (DOI/accession), `title`, `source` (provenance),
-  `modality`. *(No `experimental_narrative`; that field is removed.)*
-- `DatasetNode` — `dataset_id`, `data_uri`, `assay`, `cell_count`/size,
-  parent study.
+  `modality`. *(No `experimental_narrative`; that field is removed.)* Raw free
+  text (abstracts, full descriptions) is **not** stored on the node — it belongs
+  to the per-source `RawRecord`; the canonical node holds only normalized,
+  design-describing fields.
+- `DatasetNode` — `dataset_id`, `data_uri`, `assay`, `cell_count`/size. Its
+  parent study is a typed `EXTRACTED_FROM` **edge**, not a stored foreign-key
+  field. *(Decision, PR 2: containment/relationships live on edges only;
+  duplicating them as node fields invites drift and gives two sources of truth.)*
 - `SampleNode` — `sample_id`, `data_uri`, and **design covariates**: `condition`,
   `perturbation`, `timepoint`, `subject`, `organism`. (Reintroduced; the prior
-  schema was dataset-level only.)
+  schema was dataset-level only.) All covariates are optional — different
+  sources populate different subsets. Linked to its dataset/study via a typed
+  edge (e.g. `HAS_SAMPLE`).
 - `BiologicalEntityNode` — `entity_type` ∈ {Disease, Tissue, Species,
   Perturbation, Assay}, `ontology_id`, `name`. **CellType is intentionally
   absent.**
-- `GraphEdge` — typed, directed: `EXTRACTED_FROM`, `MEASURED_WITH`,
-  `HAS_CONDITION`, `STUDIES`, `HAS_SAMPLE`, etc.
+- `GraphEdge` — typed, directed: `EXTRACTED_FROM` (Dataset→Study), `HAS_SAMPLE`
+  (Dataset→Sample), `HAS_TISSUE` / `HAS_CONDITION` (Dataset→BiologicalEntity),
+  `MEASURED_WITH` (Dataset→Assay), `STUDIES` (Study→Species), etc. `relation_type`
+  is a free `str` for now (the vocabulary still grows as GEO/PRIDE land); it may
+  become a `StrEnum` once the set stabilizes.
 
 Cross-source links are *emergent*: two studies share an edge target
 (`ontology_id`) rather than any source-specific key.
