@@ -34,9 +34,7 @@ class TestAzureCredential:
     async def test_credential_get_token(self):
         """AzureCliCredential can obtain a token for the Azure AI scope."""
         async with AzureCliCredential() as credential:
-            token = await credential.get_token(
-                "https://cognitiveservices.azure.com/.default"
-            )
+            token = await credential.get_token("https://cognitiveservices.azure.com/.default")
             assert token.token
             assert len(token.token) > 0
 

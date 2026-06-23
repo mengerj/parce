@@ -40,7 +40,9 @@ class SampleRecord(BaseModel):
     sample_id: str = Field(..., description="Repository sample accession (e.g. GSM1234567).")
     organism: str = Field(..., description="Species name (e.g. Mus musculus).")
     strain: str | None = Field(default=None, description="Strain or genetic background.")
-    cell_type: str | None = Field(default=None, description="Cell type profiled (e.g. CD8+ T cell).")
+    cell_type: str | None = Field(
+        default=None, description="Cell type profiled (e.g. CD8+ T cell)."
+    )
     tissue: str | None = Field(default=None, description="Tissue of origin (e.g. spleen).")
     condition: str | None = Field(
         default=None,

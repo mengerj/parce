@@ -13,7 +13,6 @@ import pytest
 
 from parce.main import _build_narrative_prompt, run
 
-
 _MOCK_PAPER = {
     "doi": "10.1234/mock",
     "title": "Mock Study",
@@ -65,6 +64,16 @@ class TestBuildNarrativePrompt:
 
 
 class TestRunOrchestration:
+    @pytest.fixture(autouse=True)
+    def _mock_settings(self):
+        # The agent is mocked, so real Azure config is irrelevant here. Patch
+        # Settings so the test never reads the environment / .env file and stays
+        # hermetic (CI has no .env). max_retries must be a real int for range().
+        fake = MagicMock()
+        fake.max_retries = 3
+        with patch("parce.main.Settings", return_value=fake):
+            yield fake
+
     @pytest.fixture
     def _mock_tools(self):
         with (
@@ -98,6 +107,7 @@ class TestRunOrchestration:
         assert out_file.exists()
 
         import json
+
         kg = json.loads(out_file.read_text())
         assert len(kg["publications"]) == 1
         assert kg["publications"][0]["doi"] == "10.1234/mock"

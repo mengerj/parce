@@ -62,9 +62,7 @@ class TestDatasetNode:
 
     def test_extra_forbidden(self):
         with pytest.raises(ValidationError):
-            DatasetNode(
-                dataset_id="x", uri="s3://x", modality="m", cell_count=1, oops=True
-            )
+            DatasetNode(dataset_id="x", uri="s3://x", modality="m", cell_count=1, oops=True)
 
 
 class TestBiologicalEntityNode:
@@ -86,9 +84,7 @@ class TestBiologicalEntityNode:
 
     def test_invalid_entity_type(self):
         with pytest.raises(ValidationError):
-            BiologicalEntityNode(
-                entity_type="NotAType", ontology_id="X", name="bad"
-            )
+            BiologicalEntityNode(entity_type="NotAType", ontology_id="X", name="bad")
 
     def test_extra_forbidden(self):
         with pytest.raises(ValidationError):

@@ -40,7 +40,12 @@ def fetch_paper_metadata(doi: str) -> dict:
     results = data.get("resultList", {}).get("result", [])
     if not results:
         logger.warning("No publication found for DOI=%s", doi)
-        return {"doi": doi, "title": "", "abstract": "", "error": f"No publication found for DOI {doi}"}
+        return {
+            "doi": doi,
+            "title": "",
+            "abstract": "",
+            "error": f"No publication found for DOI {doi}",
+        }
 
     paper = results[0]
     return {

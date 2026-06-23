@@ -28,7 +28,9 @@ class PublicationNode(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    doi: str = Field(..., description="Digital Object Identifier (e.g. 10.1038/s41586-023-05869-0).")
+    doi: str = Field(
+        ..., description="Digital Object Identifier (e.g. 10.1038/s41586-023-05869-0)."
+    )
     title: str = Field(..., description="Publication title.")
     abstract: str = Field(..., description="Full abstract text.")
     experimental_narrative: str = Field(
@@ -79,7 +81,9 @@ class GraphEdge(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source_id: str = Field(..., description="Identifier of the source node (DOI or dataset_id or ontology_id).")
+    source_id: str = Field(
+        ..., description="Identifier of the source node (DOI or dataset_id or ontology_id)."
+    )
     target_id: str = Field(..., description="Identifier of the target node.")
     relation_type: str = Field(
         ...,
