@@ -23,17 +23,22 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
   session prompt), GitHub Actions CI (ruff, mypy, pytest), ruff rule set + mypy
   config in `pyproject.toml`, code formatted to baseline. No behavior change.
 - [ ] **PR 2 — Canonical KG schema.** Source-agnostic nodes/edges; add
-  `SampleNode` with design covariates; drop `experimental_narrative` and
-  `CellType`. Migrate builder + tests. *(Next up.)*
+  `SampleNode` with design covariates; replace free-text `modality` with `assay`
+  (EFO term ref) + a coarse `molecular_layer` enum; drop `experimental_narrative`
+  and `CellType`. Migrate builder + tests. *(Next up. See ARCHITECTURE §4–5.)*
 - [ ] **PR 3 — Source-adapter interface + cheap CELLxGENE adapter.** Define
   `SourceAdapter` / `Normalizer` protocols in `sources/` + `normalize/`. Refactor
   CELLxGENE into a deterministic adapter. **Remove the LLM/Azure narrative path
   entirely** (delete `agent/prompts.py` narrative role, `models/narrative.py`,
   the step-2 block in `main.py`). Drop cell-type extraction. Remove the
   `parce.tools.*` mypy exemption as those modules move under `sources/`.
-- [ ] **PR 4 — Ontology resolver.** Shared `ontology/` stage: free-text →
-  UBERON/MONDO/assay IDs (deterministic OLS/text2term + on-disk cache), LLM
-  fallback for hard cases. Wire into normalizers.
+- [ ] **PR 4 — Ontology resolver.** Shared `ontology/` stage (see ARCHITECTURE
+  §5). Pin the **facet → ontology registry** as a constant (EFO, UBERON, MONDO,
+  NCBITaxon, ChEBI, PSI-MS, EDAM). Implement free-text → term resolution
+  (OLS4 REST + text2term/Zooma, on-disk cache; LLM fallback) and the
+  **`molecular_layer` derivation** (walk EFO `is-a` ancestors to anchor classes).
+  Decide the anchor set + the no-anchor default. Wire into normalizers. Resolve
+  IDs at runtime via OLS — do not hardcode term IDs.
 - [ ] **PR 5 — GEO extraction agent (vertical slice).** GEO adapter
   (E-utilities/GEOparse) + Azure extraction normalizer emitting the canonical
   schema via `response_format`; extract sample covariates from
@@ -62,6 +67,20 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
+
+### 2026-06-23 — Ontology grounding (docs)
+- Decision: every experiment facet binds to one designated ontology (EFO assay,
+  UBERON tissue, MONDO disease, NCBITaxon organism, ChEBI/gene-ID perturbation,
+  PSI-MS for MS proteomics, EDAM data format). Registry lives in `parce/ontology/`.
+- Decision: **no free-text `modality`.** Store `assay` (EFO term ID) + a coarse
+  `molecular_layer` enum derived by walking EFO `is-a` ancestors. Both controlled.
+- Decision: resolve term IDs at runtime via OLS4 (+ text2term/Zooma, LLM
+  fallback); never hardcode IDs. Follow SDRF/MAGE-TAB conventions for the record.
+- Updated ARCHITECTURE §4–5 (new §5 Ontology grounding; later sections renumbered)
+  and sharpened ROADMAP PR 2 (`assay`+`molecular_layer`) and PR 4 (registry +
+  lineage derivation + anchor-set open question).
+- No code change; the orchestration CI fix (`6eb2fc9`) and action bump (`9f8403c`)
+  remain the latest functional state. **Next up unchanged: PR 2.**
 
 ### 2026-06-23 — PR 1: Foundations & tooling
 - Branch `restructure-context-metadata` off `main` (post-cxg-merge).

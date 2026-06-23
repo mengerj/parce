@@ -92,9 +92,10 @@ modality is wanted before proteomics.)
 Source-agnostic nodes (Pydantic v2, `extra="forbid"`):
 
 - `StudyNode` — `study_id` (DOI/accession), `title`, `source` (provenance),
-  `modality`. *(No `experimental_narrative`; that field is removed.)*
-- `DatasetNode` — `dataset_id`, `data_uri`, `assay`, `cell_count`/size,
-  parent study.
+  `molecular_layer` (coarse controlled enum, see §5). *(No `modality` free-text
+  string; no `experimental_narrative`.)*
+- `DatasetNode` — `dataset_id`, `data_uri`, `assay` (EFO term reference, see §5),
+  `cell_count`/size, parent study.
 - `SampleNode` — `sample_id`, `data_uri`, and **design covariates**: `condition`,
   `perturbation`, `timepoint`, `subject`, `organism`. (Reintroduced; the prior
   schema was dataset-level only.)
@@ -107,7 +108,66 @@ Source-agnostic nodes (Pydantic v2, `extra="forbid"`):
 Cross-source links are *emergent*: two studies share an edge target
 (`ontology_id`) rather than any source-specific key.
 
-## 5. Coding style & architecture choices
+## 5. Ontology grounding
+
+Every facet of an experiment is bound to **one designated ontology**, never a
+free-text string. This is what makes context a real metric space — the
+precondition for cross-source linking and for the downstream model's shared
+context space.
+
+### Facet → ontology registry
+
+This registry is a constant in `parce/ontology/` and the single source of truth
+for "which vocabulary annotates which field".
+
+| Facet | Ontology | Notes |
+|-------|----------|-------|
+| Assay / platform | **EFO** | Cross-domain assay branch (scRNA-seq, ATAC-seq, MS proteomics, …). CELLxGENE already emits EFO assay IDs. |
+| Assay (upper-level / fallback) | **OBI** | Where EFO lacks a term. |
+| MS proteomics specifics | **PSI-MS CV** | Instruments / acquisition; matches SDRF-Proteomics. |
+| Tissue / anatomy | **UBERON** | Sample source. |
+| Disease / condition | **MONDO** | Unified; prefer over bare DOID. |
+| Organism | **NCBITaxon** | Already in use. |
+| Cell type | **CL** | Exists but **excluded as context** (data-inferred → leakage). |
+| Chemical / drug perturbation | **ChEBI** | Compound treatments. |
+| Genetic perturbation | gene ID (**Ensembl**/**HGNC**) + action vocab | No clean single ontology for knockout vs. knockdown; pair gene ID with a small controlled action term. |
+| Data format | **EDAM** | FASTQ/BAM/mzML/H5AD as typed terms. |
+
+### "Modality" is two controlled fields, not one string
+
+Avoid a free-text `modality`. Instead store, per dataset/study:
+
+1. **`assay`** — a precise **EFO term ID** (resolved once from free text, then
+   stable). Fine-grained (every 10x chemistry is its own term).
+2. **`molecular_layer`** — a coarse enum `{genome, epigenome, transcriptome,
+   proteome, metabolome, …}` **derived deterministically by walking the EFO
+   term's `is-a` ancestors** to a small set of anchor classes. The lineage does
+   the classification; we never re-string it.
+
+The model sees a clean cross-modality categorical (`molecular_layer`) plus a
+precise term (`assay`) — both controlled, no free text on either.
+
+### Resolution (deterministic-first; see §3)
+
+- **OLS4** (EBI Ontology Lookup Service) — one REST API to search free text →
+  candidate terms and to validate an ID + fetch ancestors (used for the
+  `molecular_layer` lineage walk).
+- **text2term** / **Zooma** — batch free-text → term mapping (Zooma is well
+  suited to messy GEO characteristics).
+- **OxO** — cross-ontology ID mapping when sources disagree (e.g. DOID → MONDO).
+- **LLM** — fallback only, for strings the deterministic resolvers can't
+  confidently map.
+
+Template to follow rather than reinvent: **SDRF / MAGE-TAB** (and
+**SDRF-Proteomics**) already specify per-sample, ontology-annotated experiment
+description and *which ontology per column* — almost exactly the `SampleNode` +
+this registry. Aligning to it also yields free structured terms from sources
+that already ship SDRF.
+
+> Specific EFO/MONDO/etc. IDs are **resolved/validated via OLS at runtime**, not
+> hardcoded from memory. The registry pins *ontologies*, not term IDs.
+
+## 6. Coding style & architecture choices
 
 - **Language/runtime:** Python ≥ 3.11, `src`-layout, `from __future__ import
   annotations` everywhere, full type hints on public APIs.
@@ -128,13 +188,17 @@ Cross-source links are *emergent*: two studies share an edge target
 - **Tests:** offline unit tests by default; live/credentialed tests carry the
   `integration` marker and are excluded from CI.
 
-## 6. Open questions (track, don't silently decide)
+## 7. Open questions (track, don't silently decide)
 
 - **Sample granularity for CELLxGENE.** Census is per-cell/dataset, not
   per-sample in the GEO sense. Defer mapping cxg to `SampleNode` until needed;
   keep it dataset-level for now.
-- **Ontology resolver dependency.** text2term vs. a thin OLS REST client —
-  decide when implementing `ontology/` (PR4); prefer the lighter dependency.
+- **`molecular_layer` anchor set.** The exact EFO ancestor classes that define
+  each coarse layer need pinning during PR4 (and a default for assays whose
+  lineage doesn't reach an anchor).
+- **Ontology resolver dependency.** OLS4 REST client (needed anyway for the
+  lineage walk) vs. adding text2term/Zooma — prefer the lightest combination
+  that covers messy GEO strings; decide in PR4.
 - **Graph persistence/export format** for the modeling step (per-study context +
   sample manifest + URIs). Specified in a later PR.
 - **Multi-omics is core, not optional.** CELLxGENE alone cannot carry the
