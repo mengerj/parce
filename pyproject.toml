@@ -14,9 +14,11 @@ dependencies = [
     "agent-framework-azure-ai>=1.0.0rc5",
     "azure-ai-projects>=2.0.1",
     "azure-identity>=1.25.3",
+    "cellxgene-census>=1.17.0",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.2",
+    "requests>=2.33.0",
 ]
 
 [project.optional-dependencies]
