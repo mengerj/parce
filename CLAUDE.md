@@ -71,7 +71,11 @@ depend on `models`; `models` depends on nothing. No import cycles.
   - `pytest -m "not integration"` — unit tests, must stay offline.
 - **Tests:** unit tests must not touch the network, Azure, or Census — mock
   them. Anything that needs live credentials or downloads is marked
-  `@pytest.mark.integration` and excluded from CI.
+  `@pytest.mark.integration` and excluded from CI. **Unit tests must not depend
+  on a local `.env`** — no unit test may construct `Settings()` unmocked.
+  Verify hermeticity before reporting green: run the unit suite with `.env`
+  moved aside (`mv .env .env.bak && uv run pytest -m "not integration"; mv
+  .env.bak .env`), which reproduces the CI runner exactly.
 - **Config & secrets:** all config via `pydantic-settings` (`config/settings.py`)
   and `.env`. Never hardcode endpoints or commit secrets; update `.env.example`
   when you add a setting. `data/` is gitignored.

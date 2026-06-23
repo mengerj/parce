@@ -64,6 +64,16 @@ class TestBuildNarrativePrompt:
 
 
 class TestRunOrchestration:
+    @pytest.fixture(autouse=True)
+    def _mock_settings(self):
+        # The agent is mocked, so real Azure config is irrelevant here. Patch
+        # Settings so the test never reads the environment / .env file and stays
+        # hermetic (CI has no .env). max_retries must be a real int for range().
+        fake = MagicMock()
+        fake.max_retries = 3
+        with patch("parce.main.Settings", return_value=fake):
+            yield fake
+
     @pytest.fixture
     def _mock_tools(self):
         with (
