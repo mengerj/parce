@@ -8,14 +8,14 @@ protocol and [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## ▶ Next up
 
-**PR 3 — Source-adapter interface + cheap CELLxGENE adapter.** Define
-`SourceAdapter` / `Normalizer` protocols in `sources/` + `normalize/`. Refactor
-CELLxGENE into a deterministic adapter. **Remove the LLM/Azure narrative path
-entirely** (delete `agent/prompts.py` narrative role, `models/narrative.py`, the
-narrative `NarrativeOutput` schema in `models/graph_schema.py`, and step 2 of
-`main.py` — `_build_narrative_prompt`, the agent call, and the now-unused
-`narrative` variable). Drop cell-type extraction. Remove the `parce.tools.*`
-mypy exemption as those modules move under `sources/`.
+**PR 4 — Ontology resolver.** Shared `ontology/` stage (see ARCHITECTURE §5). Pin
+the **facet → ontology registry** as a constant (EFO, UBERON, MONDO, NCBITaxon,
+ChEBI, PSI-MS, EDAM). Implement free-text → term resolution (OLS4 REST +
+text2term/Zooma, on-disk cache; LLM fallback) and the **`molecular_layer`
+derivation** (walk EFO `is-a` ancestors to anchor classes). Decide the anchor set
++ the no-anchor default. Wire into normalizers — start by replacing the hardcoded
+`_ORGANISM_ONTOLOGY` map in `normalize/cellxgene.py`. Resolve IDs at runtime via
+OLS — do not hardcode term IDs.
 
 ---
 
@@ -29,20 +29,21 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 - [x] **PR 2 — Canonical KG schema.** Source-agnostic nodes/edges; add
   `SampleNode` with design covariates; drop `experimental_narrative` and
   `CellType`. Migrate builder + tests.
-- [ ] **PR 3 — Source-adapter interface + cheap CELLxGENE adapter.** Define
-  `SourceAdapter` / `Normalizer` protocols in `sources/` + `normalize/`. Refactor
-  CELLxGENE into a deterministic adapter. **Remove the LLM/Azure narrative path
-  entirely** (delete `agent/prompts.py` narrative role, `models/narrative.py`,
-  the `NarrativeOutput` schema, and the step-2 block in `main.py`). Drop
-  cell-type extraction. Remove the `parce.tools.*` mypy exemption as those
-  modules move under `sources/`. *(Next up.)*
+- [x] **PR 3 — Source-adapter interface + cheap CELLxGENE adapter.** Defined
+  `SourceAdapter` / `Normalizer` protocols in `sources/` + `normalize/`. Refactored
+  CELLxGENE into a deterministic adapter + normalizer. **Removed the LLM/Azure
+  narrative path entirely** (deleted `agent/curator.py`, `agent/prompts.py`,
+  `models/narrative.py`, the `NarrativeOutput` schema, and the step-2 block in
+  `main.py`). Dropped cell-type extraction. Removed the `parce.tools.*` mypy
+  exemption as those modules moved under `sources/`.
 - [ ] **PR 4 — Ontology resolver.** Shared `ontology/` stage (see ARCHITECTURE
   §5). Pin the **facet → ontology registry** as a constant (EFO, UBERON, MONDO,
   NCBITaxon, ChEBI, PSI-MS, EDAM). Implement free-text → term resolution
   (OLS4 REST + text2term/Zooma, on-disk cache; LLM fallback) and the
   **`molecular_layer` derivation** (walk EFO `is-a` ancestors to anchor classes).
-  Decide the anchor set + the no-anchor default. Wire into normalizers. Resolve
-  IDs at runtime via OLS — do not hardcode term IDs.
+  Decide the anchor set + the no-anchor default. Wire into normalizers (replace
+  the hardcoded `_ORGANISM_ONTOLOGY` map in `normalize/cellxgene.py`). Resolve
+  IDs at runtime via OLS — do not hardcode term IDs. *(Next up.)*
 - [ ] **PR 5 — GEO extraction agent (vertical slice).** GEO adapter
   (E-utilities/GEOparse) + Azure extraction normalizer emitting the canonical
   schema via `response_format`; extract sample covariates from
@@ -72,32 +73,80 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
 
-### 2026-06-24 — Generic retry helper (out-of-band resilience fix)
+### 2026-06-24 — Generic retry helper (resilience follow-up to PR 3)
 
-- Branch `add-generic-retry-helper` off `main`. Not a roadmap PR — **Next up
-  stays PR 3.**
-- Problem: the CELLxGENE/EuropePMC network IO had no retry/backoff. The only
-  retry helpers (`_is_transient`/`_backoff_delay` in `main.py`) are Azure-keyed
-  and wired solely into the LLM call PR 3 deletes; CLAUDE.md's "see helpers in
-  main.py" reference was effectively stale for adapters.
+- Branch `add-generic-retry-helper`. Not a roadmap PR; **closes the retry
+  follow-up flagged in the PR 3 entry below.** Next up stays PR 4. (Authored
+  before PR 3 merged, then merged on top of it — adapters now live in `sources/`.)
+- Problem: PR 3 removed the Azure-keyed `_is_transient`/`_backoff_delay` helpers
+  from `main.py` along with the LLM call (their only caller), leaving the
+  CELLxGENE/EuropePMC network IO with no retry/backoff.
 - Added `src/parce/sources/_retry.py`: generic, dependency-neutral
   `with_retries(func, ...)` + `is_transient(exc)` (exponential backoff, full
-  jitter). Lives in `sources/` so it's mypy-checked (outside the
-  `parce.tools.*` exemption) and ready when PR 3 moves the adapters there.
+  jitter); mypy-checked stable core, reusable by GEO (PR 5) / PRIDE (PR 7).
 - Transient = stdlib `TimeoutError`/`ConnectionError`/`OSError`, `requests`
   connection/timeout errors, and `requests` HTTPError with 429/5xx. **Gotcha
   recorded:** every `requests` exception subclasses `OSError`, so requests
   errors are classified *first* — otherwise a 404 / malformed-URL would be
   wrongly retried.
-- Wired into `tools/cellxgene_fetcher.py` (`open_soma`, datasets table read,
-  `get_obs`, `get_source_h5ad_uri`) and `tools/ncbi_fetcher.py`
+- Wired into `sources/cellxgene.py` (`open_soma`, datasets table read,
+  `get_obs`, `get_source_h5ad_uri`) and `sources/publication.py`
   (`fetch_paper_metadata` — `requests.get` + `raise_for_status` wrapped together
-  so 429/5xx actually retry). `main.py`'s Azure path left untouched (PR 3).
+  so 429/5xx actually retry).
 - Tests: `tests/test_retry.py` (classification + retry/exhaustion, sleep
-  patched) and `tests/test_ncbi_fetcher.py` (offline 503-then-success wiring).
-  Updated CLAUDE.md resilience reference to point at `sources/_retry.py`.
-- Gates green incl. hermetic no-`.env` run: ruff, ruff format, mypy (18 files),
-  **76 unit tests**. No dep changes.
+  patched) and `tests/test_ncbi_fetcher.py` (offline 503 / conn-error → success
+  wiring). Updated CLAUDE.md resilience reference to point at `sources/_retry.py`.
+- Gates green incl. hermetic no-`.env` run: ruff, ruff format, mypy, unit tests.
+
+### 2026-06-24 — PR 3: Source-adapter interface + CELLxGENE adapter
+
+- Branch `pr3-source-adapter-interface` off `main` (69d1f68).
+- **New contracts.** `models/raw_record.py` adds `RawRecord` (source-shaped:
+  `source`, `study_id`, `title`, free-form `payload`) — the boundary object
+  between adapters and normalizers. `sources/base.py` defines the `SourceAdapter`
+  Protocol (`source_name`, `discover(query) -> [ref]`, `fetch(ref) -> RawRecord`);
+  `normalize/base.py` defines the `Normalizer` Protocol
+  (`normalize(record) -> KnowledgeGraphOutput`). Both `@runtime_checkable`.
+- **CELLxGENE migrated to a deterministic adapter + normalizer:**
+  - `tools/cellxgene_fetcher.py` → `sources/cellxgene.py` (`CellxgeneAdapter` +
+    the `fetch_cellxgene_datasets` core fn). **Cell-type extraction dropped**: the
+    `cell_type*` Census columns and the `cell_types` summary key are gone (reading
+    a data-inferred annotation is leakage even before it hits the graph).
+  - `tools/ncbi_fetcher.py` → `sources/publication.py` (`fetch_paper_metadata`,
+    EuropePMC). The adapter's `fetch` gathers the publication title here because
+    Census exposes dataset titles + DOI but not the publication title.
+  - `graph/builder.py` → `normalize/cellxgene.py` (`CellxgeneNormalizer`). It now
+    reads `record.source`/`title`/`payload` instead of taking a hardcoded source.
+  - The `@tool`-decorated wrappers (`fetch_cellxgene_data`, `fetch_paper_context`,
+    `fetch_geo_metadata`) were vestigial from the agent-tool-calling era and are
+    deleted. The whole `tools/` package and the GEO stub are removed.
+- **Narrative/LLM path removed entirely:** deleted `agent/curator.py`,
+  `agent/prompts.py`, `models/narrative.py` (and `test_models.py`), and the
+  `NarrativeOutput` schema. `main.py` is now deterministic and **synchronous**:
+  `discover → fetch → normalize → write`. (PR 5 reintroduces async + the agent.)
+- Decisions (rationale):
+  - **Per-study assembly is the Normalizer's job; `graph/` is reserved for the
+    PR 6 cross-source merger.** Matches ARCHITECTURE §3's split. `graph/__init__.py`
+    and `agent/__init__.py` are kept as documented placeholders.
+  - **Organism→NCBITaxon map (`_ORGANISM_ONTOLOGY`) lives in the normalizer, not
+    the adapter.** The adapter emits the raw organism string; string→ID mapping is
+    normalization and becomes the PR 4 OntologyResolver's job.
+  - **`discover` is the identity on a DOI for CELLxGENE** (a collection = a DOI).
+    Keyword collection search is backlog.
+  - **Azure-coupled retry helpers removed from `main.py`** with the LLM call (their
+    only caller). CELLxGENE/EuropePMC fetches currently have no retry wrapper —
+    see follow-up below. CLAUDE.md still references "helpers in `main.py`"; left as
+    is since PR 5 reintroduces retry infra for the agent.
+- **mypy:** removed the `parce.tools.*` exemption (modules migrated + now fully
+  type-checked); `parce.agent.*` exemption stays for PR 5. mypy checks 16 files.
+- **Gates green locally, incl. hermetic run with `.env` moved aside:** ruff check,
+  ruff format --check (24 files), mypy, **47 unit tests**. No dep changes; the
+  `agent-framework`/`azure-*` deps stay (PR 5 needs them).
+- **Follow-up for a later session:** wire bounded-retry/backoff into the source
+  adapters' network calls (Census, EuropePMC) — resilience regressed when the
+  Azure-only retry helpers were removed.
+- **Next session:** PR 4 (ontology resolver). First integration point: replace
+  `_ORGANISM_ONTOLOGY` in `normalize/cellxgene.py`.
 
 ### 2026-06-23 — PR 2: Canonical KG schema
 
