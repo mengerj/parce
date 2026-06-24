@@ -11,7 +11,6 @@ from parce.models.graph_schema import (
     EntityType,
     GraphEdge,
     KnowledgeGraphOutput,
-    NarrativeOutput,
     SampleNode,
     StudyNode,
 )
@@ -210,18 +209,3 @@ class TestKnowledgeGraphOutput:
     def test_extra_forbidden(self):
         with pytest.raises(ValidationError):
             KnowledgeGraphOutput(metadata={"bad": True})
-
-
-class TestNarrativeOutput:
-    def test_valid(self):
-        n = NarrativeOutput(experimental_narrative="A narrative.")
-        assert n.experimental_narrative == "A narrative."
-
-    def test_missing_field(self):
-        with pytest.raises(ValidationError):
-            NarrativeOutput()
-
-    def test_roundtrip_json(self):
-        n = NarrativeOutput(experimental_narrative="Test narrative.")
-        restored = NarrativeOutput.model_validate_json(n.model_dump_json())
-        assert restored == n

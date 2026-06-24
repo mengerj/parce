@@ -37,15 +37,3 @@ class TestAzureCredential:
             token = await credential.get_token("https://cognitiveservices.azure.com/.default")
             assert token.token
             assert len(token.token) > 0
-
-
-class TestAgentCreation:
-    """Verify the agent can be created against the live Foundry project."""
-
-    async def test_create_narrative_agent(self):
-        """The narrative agent context manager yields a usable Agent."""
-        from parce.agent.curator import create_narrative_agent
-
-        async with create_narrative_agent() as agent:
-            assert agent is not None
-            assert agent.name == "PARCE"

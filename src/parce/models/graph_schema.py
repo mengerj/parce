@@ -159,21 +159,3 @@ class KnowledgeGraphOutput(BaseModel):
     samples: list[SampleNode] = Field(default_factory=list)
     biological_entities: list[BiologicalEntityNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
-
-
-class NarrativeOutput(BaseModel):
-    """Transitional schema for the legacy LLM narrative step.
-
-    The canonical KG no longer stores a narrative; this remains only as the
-    ``response_format`` for the narrative agent until the whole narrative path is
-    removed in PR 3 (see docs/ROADMAP.md).
-    """
-
-    experimental_narrative: str = Field(
-        ...,
-        description=(
-            "A concise paragraph synthesising the publication abstract "
-            "with the structured CELLxGENE ontology data to explain "
-            "how the data was obtained."
-        ),
-    )
