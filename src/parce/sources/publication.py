@@ -1,28 +1,29 @@
-"""Tool for fetching publication title and abstract via the EuropePMC REST API.
+"""Publication metadata helper: a study's title/abstract for a DOI via EuropePMC.
 
-Uses the free EuropePMC search endpoint (no API key required) to retrieve
-core metadata for a given DOI.
+Shared by source adapters that need a study's *publication* title — for example
+CELLxGENE, whose Census exposes per-dataset titles and the collection DOI but not
+the publication title. EuropePMC's search endpoint is free and needs no API key.
+
+This is a deterministic API call (no LLM), so it lives in ``sources/`` and is
+covered by mypy like the rest of the stable core.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Annotated
 
 import requests
-from agent_framework import tool
-from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
 _EUROPEPMC_SEARCH_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 
 
-def fetch_paper_metadata(doi: str) -> dict:
-    """Core function: fetch publication metadata and return a Python dict.
+def fetch_paper_metadata(doi: str) -> dict[str, str]:
+    """Fetch publication title and abstract for ``doi`` from EuropePMC.
 
-    This is the programmatic entry point used by the orchestrator.
+    Returns a dict with keys ``doi``, ``title`` and ``abstract``. If the DOI is
+    not found, ``title``/``abstract`` are empty and an ``error`` key is added.
     """
     logger.info("Fetching paper metadata for DOI=%s", doi)
     resp = requests.get(
@@ -53,15 +54,3 @@ def fetch_paper_metadata(doi: str) -> dict:
         "title": paper.get("title", ""),
         "abstract": paper.get("abstractText", ""),
     }
-
-
-@tool
-def fetch_paper_context(
-    doi: Annotated[str, Field(description="Publication DOI (e.g. '10.1038/s41586-023-05869-0')")],
-) -> str:
-    """Fetch the title and abstract of a publication from EuropePMC.
-
-    Returns a JSON string with keys ``doi``, ``title``, and ``abstract``.
-    If the DOI is not found, returns an error message.
-    """
-    return json.dumps(fetch_paper_metadata(doi), separators=(",", ":"))
