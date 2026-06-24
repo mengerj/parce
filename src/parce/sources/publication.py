@@ -14,6 +14,8 @@ import logging
 
 import requests
 
+from parce.sources._retry import with_retries
+
 logger = logging.getLogger(__name__)
 
 _EUROPEPMC_SEARCH_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
@@ -26,16 +28,23 @@ def fetch_paper_metadata(doi: str) -> dict[str, str]:
     not found, ``title``/``abstract`` are empty and an ``error`` key is added.
     """
     logger.info("Fetching paper metadata for DOI=%s", doi)
-    resp = requests.get(
-        _EUROPEPMC_SEARCH_URL,
-        params={
-            "query": f"DOI:{doi}",
-            "resultType": "core",
-            "format": "json",
-        },
-        timeout=30,
-    )
-    resp.raise_for_status()
+
+    def _request() -> requests.Response:
+        # raise_for_status() lives inside the retried call so that a 429/5xx
+        # surfaces as a transient HTTPError and is retried, not raised straight out.
+        resp = requests.get(
+            _EUROPEPMC_SEARCH_URL,
+            params={
+                "query": f"DOI:{doi}",
+                "resultType": "core",
+                "format": "json",
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp
+
+    resp = with_retries(_request, description=f"EuropePMC search DOI={doi}")
     data = resp.json()
 
     results = data.get("resultList", {}).get("result", [])

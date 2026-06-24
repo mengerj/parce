@@ -73,6 +73,31 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
 
+### 2026-06-24 — Generic retry helper (resilience follow-up to PR 3)
+
+- Branch `add-generic-retry-helper`. Not a roadmap PR; **closes the retry
+  follow-up flagged in the PR 3 entry below.** Next up stays PR 4. (Authored
+  before PR 3 merged, then merged on top of it — adapters now live in `sources/`.)
+- Problem: PR 3 removed the Azure-keyed `_is_transient`/`_backoff_delay` helpers
+  from `main.py` along with the LLM call (their only caller), leaving the
+  CELLxGENE/EuropePMC network IO with no retry/backoff.
+- Added `src/parce/sources/_retry.py`: generic, dependency-neutral
+  `with_retries(func, ...)` + `is_transient(exc)` (exponential backoff, full
+  jitter); mypy-checked stable core, reusable by GEO (PR 5) / PRIDE (PR 7).
+- Transient = stdlib `TimeoutError`/`ConnectionError`/`OSError`, `requests`
+  connection/timeout errors, and `requests` HTTPError with 429/5xx. **Gotcha
+  recorded:** every `requests` exception subclasses `OSError`, so requests
+  errors are classified *first* — otherwise a 404 / malformed-URL would be
+  wrongly retried.
+- Wired into `sources/cellxgene.py` (`open_soma`, datasets table read,
+  `get_obs`, `get_source_h5ad_uri`) and `sources/publication.py`
+  (`fetch_paper_metadata` — `requests.get` + `raise_for_status` wrapped together
+  so 429/5xx actually retry).
+- Tests: `tests/test_retry.py` (classification + retry/exhaustion, sleep
+  patched) and `tests/test_ncbi_fetcher.py` (offline 503 / conn-error → success
+  wiring). Updated CLAUDE.md resilience reference to point at `sources/_retry.py`.
+- Gates green incl. hermetic no-`.env` run: ruff, ruff format, mypy, unit tests.
+
 ### 2026-06-24 — PR 3: Source-adapter interface + CELLxGENE adapter
 
 - Branch `pr3-source-adapter-interface` off `main` (69d1f68).

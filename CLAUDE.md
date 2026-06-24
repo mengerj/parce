@@ -81,8 +81,10 @@ depend on `models`; `models` depends on nothing. No import cycles.
   when you add a setting. `data/` is gitignored.
 - **Logging, not printing,** inside library code (stdlib `logging`). `print` is
   for CLI user-facing summaries only.
-- **Resilience:** network calls to external repos/LLMs use bounded retries with
-  jittered backoff (see the existing helpers in `main.py`).
+- **Resilience:** network calls to external repos use bounded retries with
+  jittered backoff via the shared `with_retries` helper in
+  `src/parce/sources/_retry.py`. Wrap a source adapter's network IO with it
+  rather than rolling a per-adapter retry loop.
 
 ## Environment & commands
 
