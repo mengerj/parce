@@ -17,6 +17,8 @@ import cellxgene_census
 from agent_framework import tool
 from pydantic import Field
 
+from parce.sources._retry import with_retries
+
 logger = logging.getLogger(__name__)
 
 _MAX_TERMS_PER_CATEGORY = 50
@@ -63,11 +65,13 @@ def _summarise_ontology_terms(census, dataset_id: str) -> dict:
     for organism in _ORGANISM_CANDIDATES:
         try:
             t0 = time.perf_counter()
-            obs = cellxgene_census.get_obs(
+            obs = with_retries(
+                cellxgene_census.get_obs,
                 census,
                 organism,
                 column_names=_ONTOLOGY_COLUMNS,
                 value_filter=f"dataset_id == '{dataset_id}'",
+                description=f"Census get_obs dataset_id={dataset_id} organism={organism}",
             )
             elapsed = time.perf_counter() - t0
             logger.info(
@@ -120,7 +124,11 @@ def _process_single_dataset(census, row) -> dict:
 
     try:
         t_uri = time.perf_counter()
-        uri_info = cellxgene_census.get_source_h5ad_uri(dataset_id)
+        uri_info = with_retries(
+            cellxgene_census.get_source_h5ad_uri,
+            dataset_id,
+            description=f"Census get_source_h5ad_uri dataset_id={dataset_id}",
+        )
         h5ad_uri = uri_info["uri"]
         logger.info(
             "Resolved H5AD URI dataset_id=%s (%.2fs)",
@@ -151,10 +159,13 @@ def fetch_cellxgene_datasets(doi: str, *, max_workers: int = 4) -> dict:
     """
     t_all = time.perf_counter()
     logger.info("Opening CELLxGENE Census")
-    census = cellxgene_census.open_soma()
+    census = with_retries(cellxgene_census.open_soma, description="Census open_soma")
     try:
         t0 = time.perf_counter()
-        datasets_df = census["census_info"]["datasets"].read().concat().to_pandas()
+        datasets_df = with_retries(
+            lambda: census["census_info"]["datasets"].read().concat().to_pandas(),
+            description="Census datasets table read",
+        )
         logger.info(
             "Loaded Census datasets table rows=%d (%.2fs)",
             len(datasets_df),

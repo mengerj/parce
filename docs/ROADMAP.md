@@ -72,6 +72,33 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
 
+### 2026-06-24 — Generic retry helper (out-of-band resilience fix)
+
+- Branch `add-generic-retry-helper` off `main`. Not a roadmap PR — **Next up
+  stays PR 3.**
+- Problem: the CELLxGENE/EuropePMC network IO had no retry/backoff. The only
+  retry helpers (`_is_transient`/`_backoff_delay` in `main.py`) are Azure-keyed
+  and wired solely into the LLM call PR 3 deletes; CLAUDE.md's "see helpers in
+  main.py" reference was effectively stale for adapters.
+- Added `src/parce/sources/_retry.py`: generic, dependency-neutral
+  `with_retries(func, ...)` + `is_transient(exc)` (exponential backoff, full
+  jitter). Lives in `sources/` so it's mypy-checked (outside the
+  `parce.tools.*` exemption) and ready when PR 3 moves the adapters there.
+- Transient = stdlib `TimeoutError`/`ConnectionError`/`OSError`, `requests`
+  connection/timeout errors, and `requests` HTTPError with 429/5xx. **Gotcha
+  recorded:** every `requests` exception subclasses `OSError`, so requests
+  errors are classified *first* — otherwise a 404 / malformed-URL would be
+  wrongly retried.
+- Wired into `tools/cellxgene_fetcher.py` (`open_soma`, datasets table read,
+  `get_obs`, `get_source_h5ad_uri`) and `tools/ncbi_fetcher.py`
+  (`fetch_paper_metadata` — `requests.get` + `raise_for_status` wrapped together
+  so 429/5xx actually retry). `main.py`'s Azure path left untouched (PR 3).
+- Tests: `tests/test_retry.py` (classification + retry/exhaustion, sleep
+  patched) and `tests/test_ncbi_fetcher.py` (offline 503-then-success wiring).
+  Updated CLAUDE.md resilience reference to point at `sources/_retry.py`.
+- Gates green incl. hermetic no-`.env` run: ruff, ruff format, mypy (18 files),
+  **76 unit tests**. No dep changes.
+
 ### 2026-06-23 — PR 2: Canonical KG schema
 
 - Branch `pr2-canonical-kg-schema` off `main`.
