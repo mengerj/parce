@@ -14,7 +14,7 @@ import pytest
 import requests
 
 from parce.sources import _retry
-from parce.tools.ncbi_fetcher import fetch_paper_metadata
+from parce.sources.publication import fetch_paper_metadata
 
 _PAYLOAD = {"resultList": {"result": [{"title": "A Study", "abstractText": "We measured."}]}}
 
@@ -43,7 +43,7 @@ def test_retries_on_5xx_then_parses():
     failing.raise_for_status.side_effect = _http_error(503)
 
     with patch(
-        "parce.tools.ncbi_fetcher.requests.get",
+        "parce.sources.publication.requests.get",
         side_effect=[failing, _ok_response()],
     ) as mock_get:
         result = fetch_paper_metadata("10.1234/mock")
@@ -54,7 +54,7 @@ def test_retries_on_5xx_then_parses():
 
 def test_retries_on_connection_error_then_parses():
     with patch(
-        "parce.tools.ncbi_fetcher.requests.get",
+        "parce.sources.publication.requests.get",
         side_effect=[requests.ConnectionError("refused"), _ok_response()],
     ) as mock_get:
         result = fetch_paper_metadata("10.1234/mock")
