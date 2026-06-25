@@ -37,6 +37,28 @@ class EntityType(StrEnum):
     ASSAY = "Assay"
 
 
+class MolecularLayer(StrEnum):
+    """Coarse molecular readout an assay measures — a controlled, cross-modality
+    categorical the downstream model can condition on.
+
+    Derived deterministically by walking an EFO ``assay`` term's ``is-a``
+    ancestors to a pinned anchor class (see :mod:`parce.ontology.layers`); never
+    re-strung from free text. ``UNKNOWN`` is the no-anchor default for assays
+    whose lineage reaches none of the anchors.
+
+    Defined here, the canonical-vocabulary home, so the ontology stage can target
+    it now. It becomes a stored field on the study/dataset nodes in the
+    schema-refinement PR (see docs/ROADMAP.md).
+    """
+
+    GENOME = "genome"
+    EPIGENOME = "epigenome"
+    TRANSCRIPTOME = "transcriptome"
+    PROTEOME = "proteome"
+    METABOLOME = "metabolome"
+    UNKNOWN = "unknown"
+
+
 class StudyNode(BaseModel):
     """A study (publication or repository accession), source-agnostic.
 

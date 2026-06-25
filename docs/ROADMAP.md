@@ -8,14 +8,18 @@ protocol and [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## ▶ Next up
 
-**PR 4 — Ontology resolver.** Shared `ontology/` stage (see ARCHITECTURE §5). Pin
-the **facet → ontology registry** as a constant (EFO, UBERON, MONDO, NCBITaxon,
-ChEBI, PSI-MS, EDAM). Implement free-text → term resolution (OLS4 REST +
-text2term/Zooma, on-disk cache; LLM fallback) and the **`molecular_layer`
-derivation** (walk EFO `is-a` ancestors to anchor classes). Decide the anchor set
-+ the no-anchor default. Wire into normalizers — start by replacing the hardcoded
-`_ORGANISM_ONTOLOGY` map in `normalize/cellxgene.py`. Resolve IDs at runtime via
-OLS — do not hardcode term IDs.
+**PR 4b — Schema refinement: EFO `assay` term + stored `molecular_layer`.** PR 4
+shipped the ontology *stage* (resolver, registry, OLS4 client, cache,
+`molecular_layer` **derivation**) but did not change the canonical schema. This
+PR consumes it: on `StudyNode`/`DatasetNode`, replace the free-text `modality`
+string with an EFO `assay` **term ID** (resolved via `OntologyResolver`) plus a
+stored `molecular_layer` enum field (derived via `OntologyResolver.molecular_
+layer`). Wire both into `CellxgeneNormalizer` (it already resolves organism;
+extend to ground the assay string and derive the layer). Migrate the schema +
+all tests. `MolecularLayer` already lives in `models/graph_schema.py`. **Gotcha:**
+the provisional anchor labels in `ontology/layers.py` are unvalidated against live
+EFO — run `tests/test_ontology_integration.py` and tighten them first, else every
+assay derives `UNKNOWN`.
 
 ---
 
@@ -36,14 +40,22 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
   `models/narrative.py`, the `NarrativeOutput` schema, and the step-2 block in
   `main.py`). Dropped cell-type extraction. Removed the `parce.tools.*` mypy
   exemption as those modules moved under `sources/`.
-- [ ] **PR 4 — Ontology resolver.** Shared `ontology/` stage (see ARCHITECTURE
-  §5). Pin the **facet → ontology registry** as a constant (EFO, UBERON, MONDO,
-  NCBITaxon, ChEBI, PSI-MS, EDAM). Implement free-text → term resolution
-  (OLS4 REST + text2term/Zooma, on-disk cache; LLM fallback) and the
-  **`molecular_layer` derivation** (walk EFO `is-a` ancestors to anchor classes).
-  Decide the anchor set + the no-anchor default. Wire into normalizers (replace
-  the hardcoded `_ORGANISM_ONTOLOGY` map in `normalize/cellxgene.py`). Resolve
-  IDs at runtime via OLS — do not hardcode term IDs. *(Next up.)*
+- [x] **PR 4 — Ontology resolver (stage + organism wiring).** Shared `ontology/`
+  stage (see ARCHITECTURE §5): pinned the **facet → ontology registry** constant
+  (EFO/OBI/PSI-MS, UBERON, MONDO, NCBITaxon, ChEBI, EDAM); `OlsClient` (OLS4 REST,
+  retry-wrapped, injectable); on-disk `ResolutionCache` (negative results cached);
+  `OntologyResolver` (cache → OLS exact-then-fuzzy → pluggable LLM-fallback hook,
+  default off); and the **`molecular_layer` derivation** (EFO `is-a` ancestor walk
+  → pinned anchor labels; no-anchor default `UNKNOWN`). Replaced the hardcoded
+  `_ORGANISM_ONTOLOGY` map in `normalize/cellxgene.py` with runtime NCBITaxon
+  resolution. **Decided: OLS4-only** for now (text2term/Zooma deferred to GEO/PR 5
+  — CELLxGENE ships IDs, only organism free-text needed grounding). IDs resolved
+  at runtime; none hardcoded. *Split from the original PR 4: the schema change
+  (store the EFO assay term + `molecular_layer`) became PR 4b.*
+- [ ] **PR 4b — Schema refinement.** Replace free-text `modality` with an EFO
+  `assay` term ID + a stored `molecular_layer` enum on the study/dataset nodes;
+  wire the resolver's assay grounding + layer derivation into the normalizer;
+  migrate the schema and tests. *(Next up — see top of file.)*
 - [ ] **PR 5 — GEO extraction agent (vertical slice).** GEO adapter
   (E-utilities/GEOparse) + Azure extraction normalizer emitting the canonical
   schema via `response_format`; extract sample covariates from
@@ -72,6 +84,69 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
+
+### 2026-06-25 — PR 4: Ontology resolver (stage + organism wiring)
+
+- Branch `pr4-ontology-resolver` off `main` (64ed4f4).
+- **Split decision.** The roadmap's PR 4 bundled the resolver stage *and* the
+  schema change (free-text `modality` → EFO `assay` term + stored
+  `molecular_layer`). Shipped the stage + organism wiring here; the schema
+  migration is now **PR 4b** (new ▶ Next up). Rationale: the stage is a coherent,
+  fully-tested unit; the schema swap touches the canonical models + every
+  CELLxGENE test and is cleaner as its own focused PR.
+- **New package `src/parce/ontology/`** (stable core, fully mypy-checked):
+  - `registry.py` — `Facet` enum + `FACET_ONTOLOGY` constant. Pins *ontologies,
+    not IDs*: EFO (assay; fallbacks OBI then PSI-MS), UBERON, MONDO, NCBITaxon,
+    ChEBI, EDAM. `FacetBinding.ontologies()` gives primary→fallback order.
+  - `ols.py` — `OlsClient` for OLS4 REST: `search` (free text → class hits) and
+    `ancestors` (hierarchical/`is-a`). `http` getter is injectable (offline
+    tests); requests wrapped in `sources._retry.with_retries`. `obo_id_to_iri`
+    builds EFO + generic OBO-PURL IRIs and the path is double-URL-encoded.
+  - `cache.py` — `ResolutionCache`, JSON-on-disk, atomic writes, lock-guarded.
+    **Caches negative results** (a *miss* vs a cached-`None` are distinguished via
+    `get`'s first return value) so unresolvable strings aren't re-queried.
+  - `layers.py` — `derive_molecular_layer(ancestor_labels)`: pure function
+    matching EFO ancestor **labels** (not IDs) against a pinned anchor set;
+    most-specific-first; no-anchor default `MolecularLayer.UNKNOWN`.
+  - `resolver.py` — `OntologyResolver`: `resolve_term(text, facet)` (cache → OLS
+    exact-then-fuzzy across the facet's ontologies → optional LLM fallback) and
+    `molecular_layer(assay_id, assay_label=None)`. All collaborators injectable;
+    default cache is lazy so construction touches neither disk nor network.
+  - `base.py` — `ResolvedTerm` value type + the narrow `TermResolver` Protocol
+    normalizers depend on.
+- **`MolecularLayer` StrEnum added to `models/graph_schema.py`** (its home, since
+  `models` depends on nothing and it becomes a node field in PR 4b). Not yet a
+  stored field anywhere.
+- **Normalizer wired:** `CellxgeneNormalizer(resolver=...)` now grounds the bare
+  organism string to NCBITaxon via the resolver (replacing `_ORGANISM_ONTOLOGY`).
+  Tissue/disease/assay still use the IDs Census already ships — only organism was
+  free text. An organism that fails to resolve is **skipped** (no ungrounded node
+  emitted), logged at WARNING.
+- **Decisions / rationale:**
+  - **OLS4-only** (open question §7 resolved): text2term/Zooma deferred to GEO
+    (PR 5), where the messy `characteristics_ch1` strings actually appear.
+  - **LLM fallback is a pluggable `Callable`, default `None`** — keeps `ontology`
+    free of any `parce.agent`/Azure import (dependency direction preserved); PR 5
+    wires the extraction agent in as the callback.
+  - **Anchor set is keyed by EFO label, not term ID** (honours "pin
+    ontologies/anchors, not IDs"). **PROVISIONAL** — unvalidated against live EFO;
+    `tests/test_ontology_integration.py` (marked, live OLS) is the validation
+    harness. PR 4b must run it and correct labels, else assays derive `UNKNOWN`.
+  - **`ontology` reuses `sources._retry`** (leaf util, no cycle) per CLAUDE.md.
+  - Resolver config (OLS base URL, cache dir) is constructor params, **not**
+    `Settings` — avoids the unit-test `Settings()` hermeticity trap; could move to
+    Settings later.
+- **Tests:** offline unit suites for registry / cache / OLS (fake HTTP getter) /
+  layers / resolver (fake client + real cache on tmp_path); `test_normalize.py`
+  and `test_orchestration.py` inject a fake resolver so they stay offline. New
+  marked integration test for live OLS (organism exact; molecular_layer plumbing).
+- **mypy:** no new exemptions; `parce.agent.*` exemption stays (PR 5). 24 source
+  files checked, clean.
+- **Gates green, incl. hermetic run (worktree has no `.env`):** ruff check,
+  ruff format --check (40 files), mypy, **121 unit tests** (was 47+retry). No dep
+  changes (stdlib + `requests`), so no `uv.lock` change.
+- **Next session:** PR 4b (schema refinement) — and validate the provisional
+  `molecular_layer` anchors against live EFO first.
 
 ### 2026-06-24 — Generic retry helper (resilience follow-up to PR 3)
 

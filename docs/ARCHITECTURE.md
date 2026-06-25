@@ -156,6 +156,17 @@ Avoid a free-text `modality`. Instead store, per dataset/study:
    term's `is-a` ancestors** to a small set of anchor classes. The lineage does
    the classification; we never re-string it.
 
+> **PR 4 — anchors & default.** `MolecularLayer` lives in `models/graph_schema.py`
+> (canonical-vocabulary home); the derivation is `parce.ontology.layers.
+> derive_molecular_layer`. The anchor set is keyed by EFO ancestor **label**, not
+> term ID — honouring "pin ontologies/anchors, not IDs" (OLS returns canonical
+> labels for every ancestor), and matched most-specific-first. The **no-anchor
+> default is `MolecularLayer.UNKNOWN`**. The current anchor labels are
+> *provisional* (an informed first cut not yet checked against live EFO); the
+> marked `tests/test_ontology_integration.py` is the validation harness, and PR 4b
+> (which adds the stored field) must tighten them. The derivation logic + default
+> are decided; only the exact label strings remain to be confirmed.
+
 The model sees a clean cross-modality categorical (`molecular_layer`) plus a
 precise term (`assay`) — both controlled, no free text on either.
 
@@ -169,6 +180,18 @@ precise term (`assay`) — both controlled, no free text on either.
 - **OxO** — cross-ontology ID mapping when sources disagree (e.g. DOID → MONDO).
 - **LLM** — fallback only, for strings the deterministic resolvers can't
   confidently map.
+
+> **PR 4 — what shipped, and why OLS4-only (for now).** The stage is implemented
+> in `parce/ontology/` as `OntologyResolver` (cache → OLS4 exact-then-fuzzy →
+> optional LLM fallback) over the registry above. **Only OLS4 is wired**;
+> text2term/Zooma are deferred to PR 5, where GEO's messy `characteristics_ch1`
+> strings actually need fuzzy batch mapping. CELLxGENE already ships ontology IDs
+> for tissue/disease/assay, so the only free-text grounding needed today is the
+> organism string → NCBITaxon. The **LLM fallback is a pluggable `Callable`
+> (default `None`)**, not a hard dependency — this keeps `ontology` free of any
+> `parce.agent`/Azure import (dependency direction holds); PR 5 supplies the
+> extraction agent as the callback. Resolutions are memoised to an on-disk cache
+> (negative results included) so runs are reproducible and don't re-query.
 
 Template to follow rather than reinvent: **SDRF / MAGE-TAB** (and
 **SDRF-Proteomics**) already specify per-sample, ontology-annotated experiment
@@ -205,12 +228,15 @@ that already ship SDRF.
 - **Sample granularity for CELLxGENE.** Census is per-cell/dataset, not
   per-sample in the GEO sense. Defer mapping cxg to `SampleNode` until needed;
   keep it dataset-level for now.
-- **`molecular_layer` anchor set.** The exact EFO ancestor classes that define
-  each coarse layer need pinning during PR4 (and a default for assays whose
-  lineage doesn't reach an anchor).
-- **Ontology resolver dependency.** OLS4 REST client (needed anyway for the
-  lineage walk) vs. adding text2term/Zooma — prefer the lightest combination
-  that covers messy GEO strings; decide in PR4.
+- **`molecular_layer` anchor set.** *Partly resolved (PR 4):* the derivation
+  mechanism and the no-anchor default (`UNKNOWN`) are pinned, and the anchors are
+  keyed by EFO **label**. **Still open:** the exact label strings are provisional
+  and unvalidated against live EFO — confirm via the marked integration test and
+  tighten in PR 4b.
+- **Ontology resolver dependency.** *Resolved (PR 4):* **OLS4 REST only** for
+  now (it covers organism grounding + the lineage walk). text2term/Zooma are
+  deferred to PR 5, where GEO's messy `characteristics_ch1` strings need fuzzy
+  batch mapping — add the lightest option that covers them then.
 - **Graph persistence/export format** for the modeling step (per-study context +
   sample manifest + URIs). Specified in a later PR.
 - **Multi-omics is core, not optional.** CELLxGENE alone cannot carry the
