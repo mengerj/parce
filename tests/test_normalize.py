@@ -1,10 +1,34 @@
-"""Unit tests for the deterministic CELLxGENE normalizer."""
+"""Unit tests for the deterministic CELLxGENE normalizer.
+
+Offline: organism grounding is driven by a fake resolver, never the live OLS
+client, so no network IO occurs.
+"""
 
 from __future__ import annotations
 
 from parce.models.graph_schema import EntityType, KnowledgeGraphOutput
 from parce.models.raw_record import RawRecord
 from parce.normalize.cellxgene import CellxgeneNormalizer
+from parce.ontology import Facet, ResolvedTerm
+
+_ORGANISMS = {
+    "Homo sapiens": ResolvedTerm("NCBITaxon:9606", "Homo sapiens"),
+    "Mus musculus": ResolvedTerm("NCBITaxon:10090", "Mus musculus"),
+}
+
+
+class _FakeResolver:
+    """Deterministic, offline stand-in for the OLS-backed OntologyResolver."""
+
+    def resolve_term(self, text: str, facet: Facet) -> ResolvedTerm | None:
+        if facet is Facet.ORGANISM:
+            return _ORGANISMS.get(text)
+        return None
+
+
+def _normalizer() -> CellxgeneNormalizer:
+    return CellxgeneNormalizer(resolver=_FakeResolver())
+
 
 # ``cell_types`` are intentionally present in the payload to prove the normalizer
 # ignores them (CellType is a data-inferred annotation, deliberately excluded).
@@ -77,7 +101,7 @@ def _empty_record() -> RawRecord:
 
 class TestCellxgeneNormalizer:
     def test_basic_structure(self):
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
 
         assert len(kg.studies) == 1
         assert kg.studies[0].study_id == "10.1234/test"
@@ -95,12 +119,12 @@ class TestCellxgeneNormalizer:
         """StudyNode.source is taken from the record, not hardcoded."""
         record = _empty_record()
         record.source = "SomeOtherSource"
-        kg = CellxgeneNormalizer().normalize(record)
+        kg = _normalizer().normalize(record)
         assert kg.studies[0].source == "SomeOtherSource"
 
     def test_cell_type_excluded(self):
         """Cell types in the payload must not produce entities or edges."""
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
 
         names = {e.name for e in kg.biological_entities}
         assert "T cell" not in names
@@ -115,13 +139,13 @@ class TestCellxgeneNormalizer:
 
     def test_tissue_entity_deduplication(self):
         """blood (UBERON:0000178) appears in both datasets but is one entity."""
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
 
         entity_ids = [e.ontology_id for e in kg.biological_entities]
         assert entity_ids.count("UBERON:0000178") == 1
 
     def test_species_entity_created(self):
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
 
         species = [e for e in kg.biological_entities if e.entity_type == EntityType.SPECIES]
         assert len(species) == 1
@@ -130,11 +154,11 @@ class TestCellxgeneNormalizer:
 
     def test_no_samples_for_cellxgene(self):
         """Census is dataset-level; no SampleNode records are emitted (yet)."""
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
         assert kg.samples == []
 
     def test_extracted_from_edges(self):
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
 
         extracted = [e for e in kg.edges if e.relation_type == "EXTRACTED_FROM"]
         assert len(extracted) == 2
@@ -142,7 +166,7 @@ class TestCellxgeneNormalizer:
         assert all(e.target_id == "10.1234/test" for e in extracted)
 
     def test_has_tissue_edges(self):
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
 
         tissue_edges = [e for e in kg.edges if e.relation_type == "HAS_TISSUE"]
         pairs = {(e.source_id, e.target_id) for e in tissue_edges}
@@ -151,20 +175,20 @@ class TestCellxgeneNormalizer:
         assert ("ds-002", "UBERON:0002048") in pairs
 
     def test_has_condition_edges(self):
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
 
         conditions = [e for e in kg.edges if e.relation_type == "HAS_CONDITION"]
         assert any(e.target_id == "PATO:0000461" for e in conditions)
 
     def test_measured_with_edges(self):
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
 
         assay_edges = [e for e in kg.edges if e.relation_type == "MEASURED_WITH"]
         assert any(e.source_id == "ds-001" and e.target_id == "EFO:0009922" for e in assay_edges)
         assert any(e.source_id == "ds-002" and e.target_id == "EFO:0008931" for e in assay_edges)
 
     def test_studies_edge(self):
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
 
         studies = [e for e in kg.edges if e.relation_type == "STUDIES"]
         assert len(studies) == 1
@@ -172,7 +196,7 @@ class TestCellxgeneNormalizer:
         assert studies[0].target_id == "NCBITaxon:9606"
 
     def test_empty_datasets(self):
-        kg = CellxgeneNormalizer().normalize(_empty_record())
+        kg = _normalizer().normalize(_empty_record())
 
         assert len(kg.studies) == 1
         assert len(kg.datasets) == 0
@@ -181,6 +205,21 @@ class TestCellxgeneNormalizer:
         assert len(kg.edges) == 0
 
     def test_roundtrip_json(self):
-        kg = CellxgeneNormalizer().normalize(_RECORD)
+        kg = _normalizer().normalize(_RECORD)
         restored = KnowledgeGraphOutput.model_validate_json(kg.model_dump_json())
         assert restored == kg
+
+    def test_unresolved_organism_skipped(self):
+        """An organism the resolver can't ground yields no species node/edge."""
+
+        class _NoOpResolver:
+            def resolve_term(self, text: str, facet: Facet) -> ResolvedTerm | None:
+                return None
+
+        kg = CellxgeneNormalizer(resolver=_NoOpResolver()).normalize(_RECORD)
+
+        species = [e for e in kg.biological_entities if e.entity_type == EntityType.SPECIES]
+        assert species == []
+        assert [e for e in kg.edges if e.relation_type == "STUDIES"] == []
+        # Non-organism entities are unaffected (they arrive pre-grounded).
+        assert any(e.ontology_id == "UBERON:0000178" for e in kg.biological_entities)

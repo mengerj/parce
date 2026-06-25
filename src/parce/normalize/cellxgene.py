@@ -1,15 +1,17 @@
 """Deterministic normalizer: a CELLxGENE ``RawRecord`` → canonical KG nodes.
 
 No LLM is involved: CELLxGENE Census already ships ontology-grounded terms, so
-this is a pure structural mapping. Two design rules show up directly here:
+this is a pure structural mapping. Three design rules show up directly here:
 
 * **Cell type is never consumed** — the adapter does not even read it
   (data-inferred → leakage; see docs/ARCHITECTURE.md §1).
 * **Census is dataset-level**, not per-sample in the GEO sense, so no
   ``SampleNode`` records are emitted yet (open question in ARCHITECTURE §7).
-
-The free-text → ontology-ID step (here, organism string → NCBITaxon) is a
-hardcoded map for now; it becomes the shared OntologyResolver stage in PR 4.
+* **Organism strings are grounded via the shared OntologyResolver**, not a
+  hardcoded map. Tissue/disease/assay already arrive as ontology IDs from
+  Census, so only the bare organism string needs runtime resolution (to
+  NCBITaxon, via OLS). An organism that fails to resolve is skipped rather than
+  emitted ungrounded.
 """
 
 from __future__ import annotations
@@ -26,21 +28,13 @@ from parce.models.graph_schema import (
     StudyNode,
 )
 from parce.models.raw_record import RawRecord
+from parce.ontology import Facet, OntologyResolver, ResolvedTerm, TermResolver
 
 logger = logging.getLogger(__name__)
 
 # High-level study modality for everything CELLxGENE ingests. (Refined into an
-# EFO ``assay`` term + derived ``molecular_layer`` in PR 4.)
+# EFO ``assay`` term + derived ``molecular_layer`` in the schema-refinement PR.)
 _STUDY_MODALITY = "scRNA-seq"
-
-# Organism free-text (as Census returns it) → (NCBITaxon ID, canonical name).
-# Stand-in for the PR 4 OntologyResolver.
-_ORGANISM_ONTOLOGY: dict[str, tuple[str, str]] = {
-    "Homo sapiens": ("NCBITaxon:9606", "Homo sapiens"),
-    "Mus musculus": ("NCBITaxon:10090", "Mus musculus"),
-    "homo_sapiens": ("NCBITaxon:9606", "Homo sapiens"),
-    "mus_musculus": ("NCBITaxon:10090", "Mus musculus"),
-}
 
 # Ontology categories that become design-context entities. Cell types are
 # deliberately absent (data-inferred → leakage).
@@ -58,7 +52,15 @@ _CATEGORY_TO_RELATION: dict[str, str] = {
 
 
 class CellxgeneNormalizer:
-    """:class:`~parce.normalize.base.Normalizer` for CELLxGENE ``RawRecord``s."""
+    """:class:`~parce.normalize.base.Normalizer` for CELLxGENE ``RawRecord``s.
+
+    Takes a :class:`~parce.ontology.base.TermResolver` (default: a real
+    :class:`~parce.ontology.resolver.OntologyResolver`) used to ground organism
+    strings. Inject a deterministic fake to keep unit tests offline.
+    """
+
+    def __init__(self, resolver: TermResolver | None = None) -> None:
+        self._resolver: TermResolver = resolver if resolver is not None else OntologyResolver()
 
     def normalize(self, record: RawRecord) -> KnowledgeGraphOutput:
         """Assemble the canonical single-study subgraph for one CELLxGENE study."""
@@ -74,7 +76,10 @@ class CellxgeneNormalizer:
         datasets: list[DatasetNode] = []
         edges: list[GraphEdge] = []
         entity_registry: dict[str, BiologicalEntityNode] = {}
-        species_seen: set[str] = set()
+        # Resolved species (by NCBITaxon ID), and a per-record memo of organism
+        # string → resolution so the same string is grounded at most once.
+        species_ids: set[str] = set()
+        organism_cache: dict[str, ResolvedTerm | None] = {}
 
         for ds in record.payload.get("datasets", []):
             dataset_id = ds["dataset_id"]
@@ -98,15 +103,15 @@ class CellxgeneNormalizer:
 
             ontology: dict[str, Any] = ds.get("ontology_summary", {})
 
-            # Register species from the organism field.
-            organism_key = ontology.get("organism", "unknown")
-            if organism_key in _ORGANISM_ONTOLOGY and organism_key not in species_seen:
-                ont_id, name = _ORGANISM_ONTOLOGY[organism_key]
-                species_seen.add(organism_key)
-                entity_registry[ont_id] = BiologicalEntityNode(
+            # Ground the organism string to a NCBITaxon term via the resolver.
+            organism_text = ontology.get("organism", "unknown")
+            species = self._resolve_organism(organism_text, organism_cache)
+            if species is not None and species.ontology_id not in species_ids:
+                species_ids.add(species.ontology_id)
+                entity_registry[species.ontology_id] = BiologicalEntityNode(
                     entity_type=EntityType.SPECIES,
-                    ontology_id=ont_id,
-                    name=name,
+                    ontology_id=species.ontology_id,
+                    name=species.name,
                 )
 
             # Register entities and create edges per design-context category.
@@ -132,8 +137,7 @@ class CellxgeneNormalizer:
                     )
 
         # Study → Species edges.
-        for organism_key in species_seen:
-            species_id = _ORGANISM_ONTOLOGY[organism_key][0]
+        for species_id in species_ids:
             edges.append(
                 GraphEdge(
                     source_id=study_id,
@@ -158,3 +162,11 @@ class CellxgeneNormalizer:
             len(kg.edges),
         )
         return kg
+
+    def _resolve_organism(
+        self, organism_text: str, memo: dict[str, ResolvedTerm | None]
+    ) -> ResolvedTerm | None:
+        """Resolve an organism string to a NCBITaxon term, memoised per record."""
+        if organism_text not in memo:
+            memo[organism_text] = self._resolver.resolve_term(organism_text, Facet.ORGANISM)
+        return memo[organism_text]

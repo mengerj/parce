@@ -11,6 +11,17 @@ import json
 from unittest.mock import patch
 
 from parce.main import run
+from parce.ontology import Facet, ResolvedTerm
+
+
+class _FakeResolver:
+    """Offline organism resolver so the real normalizer never calls OLS."""
+
+    def resolve_term(self, text: str, facet: Facet) -> ResolvedTerm | None:
+        if facet is Facet.ORGANISM and text == "Homo sapiens":
+            return ResolvedTerm("NCBITaxon:9606", "Homo sapiens")
+        return None
+
 
 _MOCK_PAPER = {
     "doi": "10.1234/mock",
@@ -40,16 +51,20 @@ _MOCK_CELLXGENE = {
 
 
 def _patch_network(paper=_MOCK_PAPER, cellxgene=_MOCK_CELLXGENE):
+    # The real adapter + normalizer run end to end; only the network seams are
+    # mocked. ``OntologyResolver`` is swapped for the offline fake so organism
+    # grounding (the normalizer's only outbound call) never touches OLS.
     return (
         patch("parce.sources.cellxgene.fetch_paper_metadata", return_value=paper),
         patch("parce.sources.cellxgene.fetch_cellxgene_datasets", return_value=cellxgene),
+        patch("parce.normalize.cellxgene.OntologyResolver", _FakeResolver),
     )
 
 
 class TestRunOrchestration:
     def test_full_pipeline(self, tmp_path):
-        p_paper, p_cx = _patch_network()
-        with p_paper, p_cx, patch("parce.main._OUTPUT_DIR", tmp_path):
+        p_paper, p_cx, p_res = _patch_network()
+        with p_paper, p_cx, p_res, patch("parce.main._OUTPUT_DIR", tmp_path):
             run(doi="10.1234/mock")
 
         out_file = tmp_path / "output.json"
@@ -67,8 +82,13 @@ class TestRunOrchestration:
         assert len(kg["edges"]) > 0
 
     def test_fetch_called_with_doi(self, tmp_path):
-        p_paper, p_cx = _patch_network()
-        with p_paper as mock_paper, p_cx as mock_cx, patch("parce.main._OUTPUT_DIR", tmp_path):
+        p_paper, p_cx, p_res = _patch_network()
+        with (
+            p_paper as mock_paper,
+            p_cx as mock_cx,
+            p_res,
+            patch("parce.main._OUTPUT_DIR", tmp_path),
+        ):
             run(doi="10.1234/mock")
 
         mock_paper.assert_called_once_with("10.1234/mock")
@@ -76,8 +96,8 @@ class TestRunOrchestration:
 
     def test_no_datasets_writes_nothing(self, tmp_path):
         empty = {"doi": "10.1234/mock", "datasets": [], "error": "No datasets found"}
-        p_paper, p_cx = _patch_network(cellxgene=empty)
-        with p_paper, p_cx, patch("parce.main._OUTPUT_DIR", tmp_path):
+        p_paper, p_cx, p_res = _patch_network(cellxgene=empty)
+        with p_paper, p_cx, p_res, patch("parce.main._OUTPUT_DIR", tmp_path):
             run(doi="10.1234/mock")
 
         assert not (tmp_path / "output.json").exists()
