@@ -7,13 +7,13 @@ The public surface:
 * :class:`Facet` / :data:`FACET_ONTOLOGY` — which ontology grounds which facet;
 * :class:`OntologyResolver` — OLS-first resolver with on-disk cache and an
   optional LLM fallback hook;
-* :class:`ResolvedTerm` / :class:`TermResolver` — the value type and the narrow
-  contract normalizers depend on.
+* :class:`ResolvedTerm` / :class:`TermResolver` / :class:`OntologyService` — the
+  value type and the contracts normalizers depend on.
 """
 
 from __future__ import annotations
 
-from parce.ontology.base import ResolvedTerm, TermResolver
+from parce.ontology.base import OntologyService, ResolvedTerm, TermResolver
 from parce.ontology.cache import ResolutionCache
 from parce.ontology.layers import derive_molecular_layer
 from parce.ontology.ols import OlsClient, OlsTerm
@@ -28,6 +28,7 @@ __all__ = [
     "OlsTerm",
     "Ontology",
     "OntologyResolver",
+    "OntologyService",
     "ResolutionCache",
     "ResolvedTerm",
     "TermResolver",

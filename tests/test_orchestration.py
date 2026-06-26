@@ -11,16 +11,22 @@ import json
 from unittest.mock import patch
 
 from parce.main import run
+from parce.models.graph_schema import MolecularLayer
 from parce.ontology import Facet, ResolvedTerm
 
 
 class _FakeResolver:
-    """Offline organism resolver so the real normalizer never calls OLS."""
+    """Offline resolver so the real normalizer never calls OLS (organism + layer)."""
 
     def resolve_term(self, text: str, facet: Facet) -> ResolvedTerm | None:
         if facet is Facet.ORGANISM and text == "Homo sapiens":
             return ResolvedTerm("NCBITaxon:9606", "Homo sapiens")
         return None
+
+    def molecular_layer(self, assay_id: str, *, assay_label: str | None = None) -> MolecularLayer:
+        if assay_id.startswith("EFO:"):
+            return MolecularLayer.TRANSCRIPTOME
+        return MolecularLayer.UNKNOWN
 
 
 _MOCK_PAPER = {
@@ -77,7 +83,13 @@ class TestRunOrchestration:
         assert kg["studies"][0]["source"] == "CELLxGENE"
         # The canonical KG never stores a narrative.
         assert "experimental_narrative" not in kg["studies"][0]
+        # The free-text 'modality' is gone; assay (EFO ID) + molecular_layer replace it.
+        assert "modality" not in kg["studies"][0]
+        assert kg["studies"][0]["assay"] == "EFO:0009922"
+        assert kg["studies"][0]["molecular_layer"] == "transcriptome"
         assert len(kg["datasets"]) == 1
+        assert kg["datasets"][0]["assay"] == "EFO:0009922"
+        assert kg["datasets"][0]["molecular_layer"] == "transcriptome"
         assert len(kg["biological_entities"]) > 0
         assert len(kg["edges"]) > 0
 

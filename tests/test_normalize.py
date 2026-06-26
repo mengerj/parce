@@ -6,7 +6,7 @@ client, so no network IO occurs.
 
 from __future__ import annotations
 
-from parce.models.graph_schema import EntityType, KnowledgeGraphOutput
+from parce.models.graph_schema import EntityType, KnowledgeGraphOutput, MolecularLayer
 from parce.models.raw_record import RawRecord
 from parce.normalize.cellxgene import CellxgeneNormalizer
 from parce.ontology import Facet, ResolvedTerm
@@ -16,14 +16,27 @@ _ORGANISMS = {
     "Mus musculus": ResolvedTerm("NCBITaxon:10090", "Mus musculus"),
 }
 
+# Both CELLxGENE assays in _RECORD are scRNA-seq → transcriptome.
+_ASSAY_LAYERS = {
+    "EFO:0009922": MolecularLayer.TRANSCRIPTOME,
+    "EFO:0008931": MolecularLayer.TRANSCRIPTOME,
+}
+
 
 class _FakeResolver:
     """Deterministic, offline stand-in for the OLS-backed OntologyResolver."""
+
+    def __init__(self) -> None:
+        self.layer_calls: list[tuple[str, str | None]] = []
 
     def resolve_term(self, text: str, facet: Facet) -> ResolvedTerm | None:
         if facet is Facet.ORGANISM:
             return _ORGANISMS.get(text)
         return None
+
+    def molecular_layer(self, assay_id: str, *, assay_label: str | None = None) -> MolecularLayer:
+        self.layer_calls.append((assay_id, assay_label))
+        return _ASSAY_LAYERS.get(assay_id, MolecularLayer.UNKNOWN)
 
 
 def _normalizer() -> CellxgeneNormalizer:
@@ -107,13 +120,40 @@ class TestCellxgeneNormalizer:
         assert kg.studies[0].study_id == "10.1234/test"
         assert kg.studies[0].title == "Test Study"
         assert kg.studies[0].source == "CELLxGENE"
-        assert kg.studies[0].modality == "scRNA-seq"
 
         assert len(kg.datasets) == 2
         assert kg.datasets[0].dataset_id == "ds-001"
         assert kg.datasets[0].data_uri == "s3://bucket/ds-001.h5ad"
-        assert kg.datasets[0].assay == "10x 3' v3"
+        assert kg.datasets[0].assay == "EFO:0009922"
         assert kg.datasets[1].dataset_id == "ds-002"
+
+    def test_dataset_assay_grounded_to_efo_id(self):
+        """Each dataset's assay is the EFO term ID, not the free-text name."""
+        kg = _normalizer().normalize(_RECORD)
+        assert kg.datasets[0].assay == "EFO:0009922"  # 10x 3' v3
+        assert kg.datasets[1].assay == "EFO:0008931"  # Smart-seq2
+
+    def test_dataset_molecular_layer_derived(self):
+        """molecular_layer is derived (via the resolver) for each EFO assay."""
+        kg = _normalizer().normalize(_RECORD)
+        assert kg.datasets[0].molecular_layer is MolecularLayer.TRANSCRIPTOME
+        assert kg.datasets[1].molecular_layer is MolecularLayer.TRANSCRIPTOME
+
+    def test_study_assay_is_dominant_and_layer_derived(self):
+        """The study's assay is its datasets' most frequent assay, with its layer."""
+        kg = _normalizer().normalize(_RECORD)
+        # ds-001 (EFO:0009922) and ds-002 (EFO:0008931) tie 1-1; the first seen wins.
+        assert kg.studies[0].assay == "EFO:0009922"
+        assert kg.studies[0].molecular_layer is MolecularLayer.TRANSCRIPTOME
+
+    def test_layer_derivation_memoised_per_assay(self):
+        """Each distinct EFO assay is layer-derived at most once (study reuses it)."""
+        resolver = _FakeResolver()
+        CellxgeneNormalizer(resolver=resolver).normalize(_RECORD)
+        derived_ids = [call[0] for call in resolver.layer_calls]
+        assert sorted(set(derived_ids)) == ["EFO:0008931", "EFO:0009922"]
+        # No id derived twice despite the study reusing the dominant dataset's assay.
+        assert len(derived_ids) == len(set(derived_ids))
 
     def test_study_source_from_record(self):
         """StudyNode.source is taken from the record, not hardcoded."""
@@ -216,6 +256,11 @@ class TestCellxgeneNormalizer:
             def resolve_term(self, text: str, facet: Facet) -> ResolvedTerm | None:
                 return None
 
+            def molecular_layer(
+                self, assay_id: str, *, assay_label: str | None = None
+            ) -> MolecularLayer:
+                return MolecularLayer.TRANSCRIPTOME
+
         kg = CellxgeneNormalizer(resolver=_NoOpResolver()).normalize(_RECORD)
 
         species = [e for e in kg.biological_entities if e.entity_type == EntityType.SPECIES]
@@ -223,3 +268,32 @@ class TestCellxgeneNormalizer:
         assert [e for e in kg.edges if e.relation_type == "STUDIES"] == []
         # Non-organism entities are unaffected (they arrive pre-grounded).
         assert any(e.ontology_id == "UBERON:0000178" for e in kg.biological_entities)
+
+    def test_ungrounded_assay_is_unknown_without_resolver_call(self):
+        """A dataset with no grounded assay gets assay='unknown', layer=UNKNOWN,
+        and the lineage walk is skipped entirely (no EFO id to walk)."""
+        record = RawRecord(
+            source="CELLxGENE",
+            study_id="10.1234/test",
+            title="Test Study",
+            payload={
+                "datasets": [
+                    {
+                        "dataset_id": "ds-x",
+                        "dataset_title": "No assay",
+                        "h5ad_uri": "s3://bucket/ds-x.h5ad",
+                        "modality": "unknown",
+                        "cell_count": 10,
+                        "ontology_summary": {"organism": "Homo sapiens", "assays": []},
+                    }
+                ]
+            },
+        )
+        resolver = _FakeResolver()
+        kg = CellxgeneNormalizer(resolver=resolver).normalize(record)
+
+        assert kg.datasets[0].assay == "unknown"
+        assert kg.datasets[0].molecular_layer is MolecularLayer.UNKNOWN
+        assert kg.studies[0].assay == "unknown"
+        assert kg.studies[0].molecular_layer is MolecularLayer.UNKNOWN
+        assert resolver.layer_calls == []  # non-EFO assay → no lineage walk

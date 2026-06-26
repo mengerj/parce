@@ -11,6 +11,7 @@ from parce.models.graph_schema import (
     EntityType,
     GraphEdge,
     KnowledgeGraphOutput,
+    MolecularLayer,
     SampleNode,
     StudyNode,
 )
@@ -40,10 +41,23 @@ class TestStudyNode:
             study_id="10.1038/s41586-023-05869-0",
             title="A study",
             source="CELLxGENE",
-            modality="scRNA-seq",
+            assay="EFO:0009922",
+            molecular_layer=MolecularLayer.TRANSCRIPTOME,
         )
         assert study.study_id == "10.1038/s41586-023-05869-0"
         assert study.source == "CELLxGENE"
+        assert study.assay == "EFO:0009922"
+        assert study.molecular_layer is MolecularLayer.TRANSCRIPTOME
+
+    def test_modality_replaced_by_assay_and_layer(self):
+        """The free-text 'modality' string is gone; assay (EFO ID) + layer replace it."""
+        assert "modality" not in StudyNode.model_fields
+        assert "assay" in StudyNode.model_fields
+        assert "molecular_layer" in StudyNode.model_fields
+
+    def test_molecular_layer_defaults_to_unknown(self):
+        study = StudyNode(study_id="10.1234/test", title="T", source="CELLxGENE", assay="unknown")
+        assert study.molecular_layer is MolecularLayer.UNKNOWN
 
     def test_no_narrative_field(self):
         """The narrative field was removed from the canonical schema."""
@@ -55,7 +69,7 @@ class TestStudyNode:
                 study_id="10.1234/test",
                 title="T",
                 source="CELLxGENE",
-                modality="scRNA-seq",
+                assay="EFO:0009922",
                 abstract="leftover",
             )
 
@@ -65,11 +79,17 @@ class TestDatasetNode:
         ds = DatasetNode(
             dataset_id="abc-123",
             data_uri="s3://cellxgene-data-public/cell-census/h5ads/abc-123.h5ad",
-            assay="10x 3' v3",
+            assay="EFO:0009922",
+            molecular_layer=MolecularLayer.TRANSCRIPTOME,
             cell_count=50000,
         )
         assert ds.cell_count == 50000
-        assert ds.assay == "10x 3' v3"
+        assert ds.assay == "EFO:0009922"
+        assert ds.molecular_layer is MolecularLayer.TRANSCRIPTOME
+
+    def test_molecular_layer_defaults_to_unknown(self):
+        ds = DatasetNode(dataset_id="x", data_uri="s3://x", assay="EFO:0009922", cell_count=1)
+        assert ds.molecular_layer is MolecularLayer.UNKNOWN
 
     def test_extra_forbidden(self):
         with pytest.raises(ValidationError):
@@ -169,14 +189,16 @@ class TestKnowledgeGraphOutput:
                     study_id="10.1234/test",
                     title="Test",
                     source="CELLxGENE",
-                    modality="scRNA-seq",
+                    assay="EFO:0009922",
+                    molecular_layer=MolecularLayer.TRANSCRIPTOME,
                 )
             ],
             datasets=[
                 DatasetNode(
                     dataset_id="ds-1",
                     data_uri="s3://bucket/ds-1.h5ad",
-                    assay="10x 3' v3",
+                    assay="EFO:0009922",
+                    molecular_layer=MolecularLayer.TRANSCRIPTOME,
                     cell_count=1000,
                 )
             ],

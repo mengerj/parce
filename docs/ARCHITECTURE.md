@@ -93,16 +93,19 @@ Source-agnostic nodes (Pydantic v2, `extra="forbid"`). Implemented in PR 2 in
 `models/graph_schema.py`:
 
 - `StudyNode` — `study_id` (DOI/accession), `title`, `source` (provenance),
-  `modality`. *(No `experimental_narrative`; that field is removed.)* Raw free
-  text (abstracts, full descriptions) is **not** stored on the node — it belongs
-  to the per-source `RawRecord`; the canonical node holds only normalized,
-  design-describing fields. *(Target, §5: this free-text `modality` is refined
-  into an EFO `assay` term plus a derived coarse `molecular_layer` enum — PR 4.)*
-- `DatasetNode` — `dataset_id`, `data_uri`, `assay` (to be grounded to an EFO
-  term ID, see §5), `cell_count`/size. Its parent study is a typed
+  `assay`, `molecular_layer`. *(No `experimental_narrative`; that field is
+  removed.)* Raw free text (abstracts, full descriptions) is **not** stored on
+  the node — it belongs to the per-source `RawRecord`; the canonical node holds
+  only normalized, design-describing fields. *(PR 4b: the free-text `modality`
+  string is gone — replaced by the EFO `assay` term ID of the study's
+  representative/dominant assay plus the derived coarse `molecular_layer` enum,
+  per §5.)*
+- `DatasetNode` — `dataset_id`, `data_uri`, `assay` (an **EFO term ID**, §5),
+  `molecular_layer`, `cell_count`/size. Its parent study is a typed
   `EXTRACTED_FROM` **edge**, not a stored foreign-key field. *(Decision, PR 2:
   containment/relationships live on edges only; duplicating them as node fields
-  invites drift and gives two sources of truth.)*
+  invites drift and gives two sources of truth.)* *(PR 4b: `assay` changed from a
+  free-text name to the grounded EFO ID, and `molecular_layer` was added.)*
 - `SampleNode` — `sample_id`, `data_uri`, and **design covariates**: `condition`,
   `perturbation`, `timepoint`, `subject`, `organism`. (Reintroduced; the prior
   schema was dataset-level only.) All covariates are optional — different
@@ -156,16 +159,33 @@ Avoid a free-text `modality`. Instead store, per dataset/study:
    term's `is-a` ancestors** to a small set of anchor classes. The lineage does
    the classification; we never re-string it.
 
-> **PR 4 — anchors & default.** `MolecularLayer` lives in `models/graph_schema.py`
-> (canonical-vocabulary home); the derivation is `parce.ontology.layers.
-> derive_molecular_layer`. The anchor set is keyed by EFO ancestor **label**, not
-> term ID — honouring "pin ontologies/anchors, not IDs" (OLS returns canonical
-> labels for every ancestor), and matched most-specific-first. The **no-anchor
-> default is `MolecularLayer.UNKNOWN`**. The current anchor labels are
-> *provisional* (an informed first cut not yet checked against live EFO); the
-> marked `tests/test_ontology_integration.py` is the validation harness, and PR 4b
-> (which adds the stored field) must tighten them. The derivation logic + default
-> are decided; only the exact label strings remain to be confirmed.
+> **PR 4 / 4b — anchors, default & stored fields.** `MolecularLayer` lives in
+> `models/graph_schema.py` (canonical-vocabulary home); the derivation is
+> `parce.ontology.layers.derive_molecular_layer`. The anchor set is keyed by EFO
+> ancestor **labels/keywords**, not term IDs — honouring "pin ontologies/anchors,
+> not IDs" (OLS returns canonical labels for every ancestor) — and matched
+> most-specific-first. The **no-anchor default is `MolecularLayer.UNKNOWN`**.
+>
+> **Decision (PR 4b): match keywords by case-insensitive *substring*, not exact
+> whole-label.** Validating the PR 4 anchors against live EFO showed the assay
+> branch is too inconsistent for exact matching: the 10x family — the bulk of
+> CELLxGENE — never reaches `RNA assay`, announcing itself only via a parent
+> `…transcription profiling` label; ATAC-seq/ChIP-seq/methylation/WGS all collapse
+> to a generic `DNA assay` ancestor whose distinguishing signal survives only in
+> the term's own label. Ordered substring keywords (transcriptome/epigenome/
+> proteome/metabolome before the broad GENOME `DNA` signals) classify all of these;
+> exact full-label matching derived `UNKNOWN` for 10x. The keyword set is validated
+> against live EFO by the marked `tests/test_ontology_integration.py`. Genuinely
+> ambiguous lineages stay `UNKNOWN` on purpose — bare "mass spectrometry" (proteome
+> vs metabolome) and multi-omic EFO terms (e.g. mCT-seq carries both `RNA assay`
+> and `DNA assay` ancestors).
+>
+> **PR 4b stores the result:** `StudyNode`/`DatasetNode` now carry the EFO `assay`
+> term ID + `molecular_layer`. For CELLxGENE the assay ID is *taken from Census's
+> already-grounded payload* (not re-resolved via OLS — Census is authoritative for
+> its own data and re-resolving could drift); the resolver is used only to walk the
+> EFO lineage for the layer. Other (free-text) sources resolve the assay string via
+> `OntologyResolver` first, then derive the layer from the resulting ID.
 
 The model sees a clean cross-modality categorical (`molecular_layer`) plus a
 precise term (`assay`) — both controlled, no free text on either.
@@ -228,11 +248,13 @@ that already ship SDRF.
 - **Sample granularity for CELLxGENE.** Census is per-cell/dataset, not
   per-sample in the GEO sense. Defer mapping cxg to `SampleNode` until needed;
   keep it dataset-level for now.
-- **`molecular_layer` anchor set.** *Partly resolved (PR 4):* the derivation
-  mechanism and the no-anchor default (`UNKNOWN`) are pinned, and the anchors are
-  keyed by EFO **label**. **Still open:** the exact label strings are provisional
-  and unvalidated against live EFO — confirm via the marked integration test and
-  tighten in PR 4b.
+- **`molecular_layer` anchor set.** *Resolved (PR 4b):* anchors are ordered,
+  case-insensitive **substring keywords** over EFO ancestor (and own-) labels,
+  validated against live EFO via the marked integration test — the 10x family,
+  scRNA/Smart-seq, spatial, ATAC/ChIP/methylation, WGS and metabolomics all
+  classify correctly; bare mass-spec and multi-omic terms stay `UNKNOWN` by
+  design. **Still open:** extend the keyword set as GEO/PRIDE bring bulk RNA-seq,
+  proteomics and other modalities with their own lineages.
 - **Ontology resolver dependency.** *Resolved (PR 4):* **OLS4 REST only** for
   now (it covers organism grounding + the lineage walk). text2term/Zooma are
   deferred to PR 5, where GEO's messy `characteristics_ch1` strings need fuzzy
