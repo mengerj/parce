@@ -77,9 +77,21 @@ class StudyNode(BaseModel):
         ...,
         description="Provenance of the study record (e.g. 'CELLxGENE', 'GEO', 'PRIDE').",
     )
-    modality: str = Field(
+    assay: str = Field(
         ...,
-        description="High-level assay modality of the study (e.g. 'scRNA-seq', 'proteomics').",
+        description=(
+            "EFO term ID of the study's representative (dominant) assay "
+            "(e.g. 'EFO:0009922' for 10x 3' v3); 'unknown' if ungrounded. Replaces "
+            "the former free-text 'modality' string — see docs/ARCHITECTURE.md §5."
+        ),
+    )
+    molecular_layer: MolecularLayer = Field(
+        default=MolecularLayer.UNKNOWN,
+        description=(
+            "Coarse molecular readout, derived from the assay's EFO 'is-a' "
+            "lineage (never re-strung from text). 'unknown' when the lineage "
+            "reaches no anchor."
+        ),
     )
 
 
@@ -95,7 +107,18 @@ class DatasetNode(BaseModel):
     )
     assay: str = Field(
         ...,
-        description="Specific assay/technology (e.g. \"10x 3' v3\", 'Smart-seq2').",
+        description=(
+            "EFO term ID of the dataset's assay/technology (e.g. 'EFO:0009922' for "
+            "10x 3' v3); 'unknown' if ungrounded. Fine-grained: every 10x chemistry "
+            "is its own term."
+        ),
+    )
+    molecular_layer: MolecularLayer = Field(
+        default=MolecularLayer.UNKNOWN,
+        description=(
+            "Coarse molecular readout derived from the assay's EFO 'is-a' lineage "
+            "(see docs/ARCHITECTURE.md §5). 'unknown' when no anchor is reached."
+        ),
     )
     cell_count: int = Field(..., description="Number of cells (or rows) in the dataset.")
 

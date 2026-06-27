@@ -8,18 +8,22 @@ protocol and [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## ▶ Next up
 
-**PR 4b — Schema refinement: EFO `assay` term + stored `molecular_layer`.** PR 4
-shipped the ontology *stage* (resolver, registry, OLS4 client, cache,
-`molecular_layer` **derivation**) but did not change the canonical schema. This
-PR consumes it: on `StudyNode`/`DatasetNode`, replace the free-text `modality`
-string with an EFO `assay` **term ID** (resolved via `OntologyResolver`) plus a
-stored `molecular_layer` enum field (derived via `OntologyResolver.molecular_
-layer`). Wire both into `CellxgeneNormalizer` (it already resolves organism;
-extend to ground the assay string and derive the layer). Migrate the schema +
-all tests. `MolecularLayer` already lives in `models/graph_schema.py`. **Gotcha:**
-the provisional anchor labels in `ontology/layers.py` are unvalidated against live
-EFO — run `tests/test_ontology_integration.py` and tighten them first, else every
-assay derives `UNKNOWN`.
+**PR 5 — GEO extraction agent (vertical slice).** First source whose metadata is
+*unstructured* free text, so the first to use the LLM. Add a GEO adapter
+(NCBI E-utilities / GEOparse) emitting a `RawRecord`, and an **Azure extraction
+normalizer** that fills the canonical schema via `response_format` (structured
+output only — never prose). Extract sample-level **design** covariates from
+`characteristics_ch1` (`condition`, `perturbation`, `timepoint`, `subject`,
+`organism`) into `SampleNode`s — never data-inferred annotations. Ground the
+extracted free-text facets through the **existing `OntologyResolver`** (organism
+→ NCBITaxon, assay → EFO + `molecular_layer`, tissue → UBERON, disease → MONDO),
+and **supply the agent as the resolver's LLM-fallback callback** for strings OLS
+can't map (the hook already exists, default off). Mark live tests
+`@pytest.mark.integration`; keep unit tests offline by mocking the Azure client.
+**Remove the `parce.agent.*` mypy exemption** in `pyproject.toml` once the agent
+moves to the normalizer interface. **Blocker risk:** needs Azure creds + an
+`az login` session; if absent, build/unit-test the deterministic scaffolding and
+log the integration boundary as a blocker rather than working around it.
 
 ---
 
@@ -52,15 +56,19 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
   — CELLxGENE ships IDs, only organism free-text needed grounding). IDs resolved
   at runtime; none hardcoded. *Split from the original PR 4: the schema change
   (store the EFO assay term + `molecular_layer`) became PR 4b.*
-- [ ] **PR 4b — Schema refinement.** Replace free-text `modality` with an EFO
-  `assay` term ID + a stored `molecular_layer` enum on the study/dataset nodes;
-  wire the resolver's assay grounding + layer derivation into the normalizer;
-  migrate the schema and tests. *(Next up — see top of file.)*
+- [x] **PR 4b — Schema refinement.** Replaced free-text `modality` with an EFO
+  `assay` term ID + a stored `molecular_layer` enum on `StudyNode`/`DatasetNode`;
+  wired assay grounding (taken from Census's already-grounded payload) + layer
+  derivation into `CellxgeneNormalizer` via a new `OntologyService` contract;
+  migrated the schema and all tests. **Switched `molecular_layer` matching from
+  exact EFO labels to ordered substring keywords** after validating against live
+  EFO (the 10x family never reaches `RNA assay`); ambiguous lineages (bare
+  mass-spec, multi-omic terms) stay `UNKNOWN` by design.
 - [ ] **PR 5 — GEO extraction agent (vertical slice).** GEO adapter
   (E-utilities/GEOparse) + Azure extraction normalizer emitting the canonical
   schema via `response_format`; extract sample covariates from
   `characteristics_ch1`. Integration test (marked). This is the agent's real
-  job; remove the `parce.agent.*` mypy exemption.
+  job; remove the `parce.agent.*` mypy exemption. *(Next up — see top of file.)*
 - [ ] **PR 6 — Cross-source KG merge.** Merge CELLxGENE + GEO into one graph
   linked through shared ontology entities; dedup; provenance on edges. Assert a
   cross-source edge exists in tests.
@@ -84,6 +92,47 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
+
+### 2026-06-26 — PR 4b: Schema refinement (EFO assay term + stored molecular_layer)
+
+- Branch `pr4b-schema-refinement` off `main` (35a28ce, the PR 4 merge). Note: the
+  scheduled session started on a stale worktree whose `main` predated the PR 4
+  merge; `gh` showed PR #7 already MERGED, so PR 4 was done and **PR 4b was the
+  real ▶ Next up**. Re-based onto `origin/main` before starting.
+- **Schema (`models/graph_schema.py`).** Dropped `StudyNode.modality`. Both
+  `StudyNode` and `DatasetNode` now carry `assay` (EFO term ID, required) +
+  `molecular_layer` (`MolecularLayer`, default `UNKNOWN`). `DatasetNode.assay`
+  changed meaning from free-text name → grounded EFO ID.
+- **Normalizer (`normalize/cellxgene.py`).** Per dataset: pick the grounded EFO
+  assay ID from Census's payload (`ontology_summary.assays`, matched to the
+  dominant `modality` *name*) and derive `molecular_layer` from it; `StudyNode`
+  built at the end with the **most-frequent** dataset assay as its representative
+  + that assay's layer. Layer derivation memoised per assay ID; only `EFO:` IDs
+  are walked (an ungrounded `unknown` assay → `UNKNOWN`, no network call).
+- **Decision — assay taken from payload, not re-resolved.** CELLxGENE ships the
+  EFO assay ID; Census is authoritative for its own data and re-resolving via OLS
+  could drift, so the resolver is used *only* for the lineage walk. Free-text
+  sources (GEO/PRIDE) will resolve the assay string first. (ARCHITECTURE §5.)
+- **Decision — `molecular_layer` matching: exact labels → substring keywords.**
+  Probing live EFO exposed the PR 4 gotcha for real: `EFO:0009922` (10x 3' v3, the
+  bulk of CELLxGENE) never reaches `RNA assay` — it sits under `…transcription
+  profiling`/`library preparation`; ATAC/ChIP/methylation/WGS all collapse to a
+  generic `DNA assay` ancestor. Rewrote `ontology/layers.py` to ordered,
+  case-insensitive **substring keywords** (transcriptome/epigenome/proteome/
+  metabolome before the broad GENOME `DNA` signals), validated against live EFO.
+  Bare mass-spec and multi-omic terms stay `UNKNOWN` by design (genuinely
+  ambiguous). The marked integration test now asserts exact layers (10x + scRNA →
+  TRANSCRIPTOME, ATAC → EPIGENOME) and **passed live** this session.
+- **New contract `OntologyService`** (`ontology/base.py`, exported) = `TermResolver`
+  + `molecular_layer`; the normalizer depends on it so offline fakes inject both
+  methods. `base.py` now imports `MolecularLayer` (models is a leaf; no cycle).
+- **Gates green incl. hermetic no-`.env` run:** ruff check, ruff format --check
+  (40 files), mypy (24 files), **133 unit tests**. Live OLS integration suite (6)
+  also passed. No dep changes; no new mypy exemptions.
+- **Next session:** PR 5 (GEO extraction agent) — first LLM/Azure source; needs
+  credentials. Wire the GEO free-text facets through the existing resolver and
+  supply the agent as its LLM-fallback callback. If Azure creds are missing, stop
+  at the integration boundary and log the blocker.
 
 ### 2026-06-25 — PR 4: Ontology resolver (stage + organism wiring)
 

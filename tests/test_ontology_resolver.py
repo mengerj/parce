@@ -155,11 +155,12 @@ class TestMolecularLayer:
         assert client.ancestors_calls == [("EFO:0009922", "efo")]
 
     def test_uses_assay_label_when_term_is_its_own_anchor(self, tmp_path):
+        # Some assays (e.g. ATAC-seq) carry the layer signal only in their own
+        # label; their EFO ancestors collapse to a generic "DNA assay". The label
+        # must be consulted even when no ancestor matches.
         client = _FakeClient(ancestors_terms=[])  # no ancestors returned
-        layer = _resolver(tmp_path, client).molecular_layer(
-            "EFO:0008931", assay_label="mass spectrometry assay"
-        )
-        assert layer is MolecularLayer.PROTEOME
+        layer = _resolver(tmp_path, client).molecular_layer("EFO:0007045", assay_label="ATAC-seq")
+        assert layer is MolecularLayer.EPIGENOME
 
     def test_unmatched_lineage_is_unknown(self, tmp_path):
         client = _FakeClient(ancestors_terms=[_term("EFO:0000001", "experimental factor")])

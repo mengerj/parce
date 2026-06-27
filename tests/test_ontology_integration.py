@@ -7,9 +7,10 @@ CI. Run with::
 
 They validate the network plumbing the unit tests mock: CURIE→IRI construction,
 double-encoding, search field parsing, and the ancestor walk. The organism
-assertions are exact and reliable. The molecular_layer assertions are softer
-because the anchor labels in ``parce.ontology.layers`` are provisional — see the
-note there; tighten these to exact ``==`` once a real lineage is observed.
+assertions are exact and reliable. The molecular_layer assertions are exact too:
+the anchor keywords in ``parce.ontology.layers`` were validated against this live
+EFO branch (the 10x family resolves via the 'transcription profiling' parent;
+scRNA/Smart-seq via 'RNA assay'). Extend the cases here as new modalities land.
 """
 
 from __future__ import annotations
@@ -51,11 +52,22 @@ class TestLiveResolution:
 
 
 class TestLiveMolecularLayer:
-    def test_scrna_seq_ancestor_walk_runs(self, resolver):
-        # EFO:0008913 = "single cell RNA sequencing". Assert the walk produces a
-        # valid layer (plumbing works); log it so anchor labels can be confirmed.
+    def test_scrna_seq_is_transcriptome(self, resolver):
+        # EFO:0008913 = "single cell RNA sequencing"; reaches the 'RNA assay' anchor.
         layer = resolver.molecular_layer("EFO:0008913", assay_label="single cell RNA sequencing")
         logger.info("Derived molecular_layer for scRNA-seq: %s", layer)
-        assert isinstance(layer, MolecularLayer)
-        # Target once anchors are validated: this should be TRANSCRIPTOME.
-        assert layer in {MolecularLayer.TRANSCRIPTOME, MolecularLayer.UNKNOWN}
+        assert layer is MolecularLayer.TRANSCRIPTOME
+
+    def test_10x_chemistry_is_transcriptome(self, resolver):
+        # EFO:0009922 = "10x 3' v3". The 10x family never reaches 'RNA assay'; it
+        # must be caught by the 'transcription profiling' parent-process anchor.
+        layer = resolver.molecular_layer("EFO:0009922", assay_label="10x 3' v3")
+        logger.info("Derived molecular_layer for 10x 3' v3: %s", layer)
+        assert layer is MolecularLayer.TRANSCRIPTOME
+
+    def test_atac_seq_is_epigenome(self, resolver):
+        # EFO:0007045 = "ATAC-seq"; the epigenome signal lives in the term's own
+        # label (its ancestors collapse to a generic 'DNA assay').
+        layer = resolver.molecular_layer("EFO:0007045", assay_label="ATAC-seq")
+        logger.info("Derived molecular_layer for ATAC-seq: %s", layer)
+        assert layer is MolecularLayer.EPIGENOME
