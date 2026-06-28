@@ -17,3 +17,9 @@ class Settings(BaseSettings):
     azure_ai_project_endpoint: str
     azure_ai_model_deployment_name: str = "mistral-large"
     max_retries: int = 3
+
+    # NCBI E-utilities / GEO courtesy parameters (optional). NCBI asks callers to
+    # identify themselves; supplying these raises rate limits. Neither is required
+    # for GEO fetches to work.
+    ncbi_email: str | None = None
+    ncbi_api_key: str | None = None

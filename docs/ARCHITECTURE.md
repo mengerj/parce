@@ -82,7 +82,14 @@ modality is wanted before proteomics.)
 - **The LLM is boxed in.** It lives only inside unstructured normalizers and is
   constrained by `response_format` to fill canonical fields — it cannot emit
   prose. This keeps the system testable and reproducible, and makes the agent's
-  output directly comparable to the deterministic path.
+  output directly comparable to the deterministic path. Concretely (PR 5), a
+  normalizer reaches the LLM only through the narrow **synchronous**
+  `StructuredExtractor` contract (`parce.agent.base`): `extract(instructions,
+  content, response_model) -> response_model`. The real implementation
+  (`parce.agent.extraction.AzureExtractionAgent`) is the *only* Azure-touching
+  module; it bridges the async `agent-framework` API to that sync seam internally,
+  so normalizers stay synchronous and are unit-tested by injecting a deterministic
+  fake extractor (no Azure in CI).
 - **Ontology resolution is a shared stage, not per-adapter.** All sources must
   land on the same IDs or the graph won't link. Deterministic resolvers are
   tried first (OLS, text2term); the LLM is a fallback for ambiguous strings.
@@ -110,7 +117,11 @@ Source-agnostic nodes (Pydantic v2, `extra="forbid"`). Implemented in PR 2 in
   `perturbation`, `timepoint`, `subject`, `organism`. (Reintroduced; the prior
   schema was dataset-level only.) All covariates are optional — different
   sources populate different subsets. Linked to its dataset/study via a typed
-  edge (e.g. `HAS_SAMPLE`).
+  edge (e.g. `HAS_SAMPLE`). *(First populated by GEO in PR 5: one `SampleNode` per
+  `GSM`, with `organism`/`data_uri` read deterministically from structured SOFT
+  fields and `condition`/`perturbation`/`timepoint`/`subject` extracted by the LLM
+  from `characteristics_ch1`. CELLxGENE still emits none — Census is dataset-level,
+  §7.)*
 - `BiologicalEntityNode` — `entity_type` ∈ {Disease, Tissue, Species,
   Perturbation, Assay}, `ontology_id`, `name`. **CellType is intentionally
   absent.**
@@ -119,6 +130,16 @@ Source-agnostic nodes (Pydantic v2, `extra="forbid"`). Implemented in PR 2 in
   `MEASURED_WITH` (Dataset→Assay), `STUDIES` (Study→Species), etc. `relation_type`
   is a free `str` for now (the vocabulary still grows as GEO/PRIDE land); it may
   become a `StrEnum` once the set stabilizes.
+  - *(Decision, PR 5: a source's design-context and `HAS_SAMPLE` edges originate
+    at whichever node is the natural containment root for that source. CELLxGENE is
+    dataset-centric (Census ships datasets), so its edges originate at the
+    `DatasetNode`. **GEO has no distinct dataset artifact** — a series *is* the
+    study, its data lives in per-sample supplementary files — so GEO emits no
+    `DatasetNode` and its `HAS_TISSUE`/`HAS_CONDITION`/`MEASURED_WITH`/`HAS_SAMPLE`
+    edges originate at the `StudyNode`, with `assay`/`molecular_layer` carried on
+    the study. This is deliberate: cross-source linking flows through shared entity
+    `ontology_id` **targets**, not the originating node, so a mixed origin does not
+    break the merge (PR 6).)*
 
 Cross-source links are *emergent*: two studies share an edge target
 (`ontology_id`) rather than any source-specific key.
