@@ -105,6 +105,34 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
 
+### 2026-06-29 — PR 5 integration boundary verified (Azure extraction live)
+
+- No code change. Scheduled session; the roadmap's ▶ Next up resolves to PR 6, but
+  PR 5 was still an **open draft (PR #9)** with one documented blocker: the live
+  Azure extraction round-trip was unverified. Cleared that blocker rather than
+  starting PR 6 on top of an unverified GEO path.
+- **Stale-base catch again:** the routine worktree's local `main` was `64ed4f4`
+  (PR 6-era), two merges behind `origin/main` (`4dcd5b7`); its roadmap showed PR 4.
+  `git fetch` + compare caught it and revealed PR #9 already open for PR 5 — so PR 5
+  was **not** rebuilt. Operated on the existing `pr5-geo-extraction-agent` branch.
+- **Why the prior session couldn't verify, and why this one could:** `Settings`
+  loads `.env` from the *worktree* root (`parents[3]`), which has none. The real
+  `.env` (with `AZURE_AI_PROJECT_ENDPOINT` + deployment) sits at the **repo** root;
+  sourcing it into the environment makes the live test's `skipif` pass and `Settings`
+  pick the creds up. `az login` was already active.
+- **Result:** `uv run pytest -m integration tests/test_geo_integration.py` → **2
+  passed** (live GEO fetch + **live Azure extraction** against the `gpt-4o`
+  deployment, ~48s). The full GEO vertical slice is now verified end-to-end. All
+  four gates re-confirmed green on this branch (hermetic, no `.env`): ruff check,
+  ruff format --check (47), mypy (28 files), **168 unit tests** (13 deselected).
+- **Follow-up (non-blocking):** `agent_framework` emits a `DeprecationWarning` — the
+  extractor passes `temperature` via `run(options=...)` runtime kwargs; the new API
+  wants `client_kwargs`/`function_invocation_kwargs`. Works today; tidy when PRIDE
+  (PR 7) touches `agent/extraction.py`.
+- **Next session:** PR 5 (#9) is verified and ready for human review/merge — left as
+  draft, not merged, per protocol. Once it merges, ▶ Next up is **PR 6** (cross-source
+  KG merge), which can now rely on the GEO path being live.
+
 ### 2026-06-28 — PR 5: GEO extraction agent (vertical slice)
 
 - Branch `pr5-geo-extraction-agent` off **`origin/main`** (4dcd5b7).
@@ -152,7 +180,8 @@ what the next session should know. Keep entries short and factual.
   --check (47 files), mypy (28 files), **168 unit tests** (13 integration
   deselected). Live `TestLiveGeoFetch` run against the real GEO endpoint — passes
   (SOFT parser validated on `GSE10072`).
-- **BLOCKER (integration boundary, per protocol):** the live **Azure extraction**
+- **BLOCKER (integration boundary, per protocol) — RESOLVED 2026-06-29 (see entry
+  above):** the live **Azure extraction**
   round-trip is **unverified** — this headless env has `az login` but no
   `AZURE_AI_PROJECT_ENDPOINT` configured (no worktree `.env`), so
   `TestLiveGeoExtraction` skips. The Azure call shape mirrors the previously-working
