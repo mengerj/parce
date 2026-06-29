@@ -63,11 +63,7 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 check_untyped_defs = true
 
-# The Azure agent glue is slated for rewrite as an extraction normalizer (PR 5,
-# see docs/ROADMAP.md). Until then it is exempt from type checking so CI tracks
-# the stable core. Remove this entry when the agent moves to the normalizer
-# interface. (The former ``parce.tools.*`` fetchers were migrated to
-# ``parce.sources.*`` in PR 3 and are now fully type-checked.)
-[[tool.mypy.overrides]]
-module = ["parce.agent.*"]
-ignore_errors = true
+# No module-level type-check exemptions remain. ``parce.tools.*`` was migrated to
+# ``parce.sources.*`` in PR 3; ``parce.agent.*`` moved to the StructuredExtractor
+# interface in PR 5 (the Azure glue is now a typed extraction agent). The whole of
+# ``src/parce`` is type-checked.

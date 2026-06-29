@@ -8,22 +8,19 @@ protocol and [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## ▶ Next up
 
-**PR 5 — GEO extraction agent (vertical slice).** First source whose metadata is
-*unstructured* free text, so the first to use the LLM. Add a GEO adapter
-(NCBI E-utilities / GEOparse) emitting a `RawRecord`, and an **Azure extraction
-normalizer** that fills the canonical schema via `response_format` (structured
-output only — never prose). Extract sample-level **design** covariates from
-`characteristics_ch1` (`condition`, `perturbation`, `timepoint`, `subject`,
-`organism`) into `SampleNode`s — never data-inferred annotations. Ground the
-extracted free-text facets through the **existing `OntologyResolver`** (organism
-→ NCBITaxon, assay → EFO + `molecular_layer`, tissue → UBERON, disease → MONDO),
-and **supply the agent as the resolver's LLM-fallback callback** for strings OLS
-can't map (the hook already exists, default off). Mark live tests
-`@pytest.mark.integration`; keep unit tests offline by mocking the Azure client.
-**Remove the `parce.agent.*` mypy exemption** in `pyproject.toml` once the agent
-moves to the normalizer interface. **Blocker risk:** needs Azure creds + an
-`az login` session; if absent, build/unit-test the deterministic scaffolding and
-log the integration boundary as a blocker rather than working around it.
+**PR 6 — Cross-source KG merge.** Merge per-study subgraphs from *different*
+sources (CELLxGENE + GEO) into one knowledge graph, deduped by ontology entity ID,
+with provenance preserved on edges. The shared-entity machinery already exists:
+both normalizers register `BiologicalEntityNode`s keyed by `ontology_id` and emit
+edges whose **targets** are those IDs (the originating node differs by source — see
+ARCHITECTURE §4 — but the merge keys on targets). Build the merger in `graph/`
+(reserved for exactly this since PR 3), take a list of `KnowledgeGraphOutput`
+subgraphs → one merged graph, dedup entities by `ontology_id`, keep all
+study/dataset/sample nodes, and carry source provenance so a shared entity records
+which studies touch it. **Assert a cross-source edge exists in tests** — e.g. a
+CELLxGENE study and a GEO study that both touch `UBERON:0002048` (lung) or a shared
+`MONDO:` disease become connected through that one entity node. Offline unit tests
+only (assemble two canned subgraphs and merge); no network.
 
 ---
 
@@ -64,14 +61,26 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
   exact EFO labels to ordered substring keywords** after validating against live
   EFO (the 10x family never reaches `RNA assay`); ambiguous lineages (bare
   mass-spec, multi-omic terms) stay `UNKNOWN` by design.
-- [ ] **PR 5 — GEO extraction agent (vertical slice).** GEO adapter
-  (E-utilities/GEOparse) + Azure extraction normalizer emitting the canonical
-  schema via `response_format`; extract sample covariates from
-  `characteristics_ch1`. Integration test (marked). This is the agent's real
-  job; remove the `parce.agent.*` mypy exemption. *(Next up — see top of file.)*
+- [x] **PR 5 — GEO extraction agent (vertical slice).** Deterministic `GeoAdapter`
+  (`sources/geo.py`): fetches GEO Series+Sample SOFT text from the GEO accession
+  endpoint, parses it (no GEOparse dep), carries `characteristics_ch1` **verbatim**
+  in the `RawRecord`. Agent-backed `GeoNormalizer` (`normalize/geo.py`): an LLM
+  (boxed behind the narrow sync `StructuredExtractor` seam, `agent/base.py`) fills
+  the `GeoExtraction` schema via `response_format` — design covariates only, no
+  field for any data-inferred annotation. `SampleNode`s now populated (organism +
+  data_uri read deterministically from structured SOFT fields; condition/
+  perturbation/timepoint/subject from the LLM). Facets grounded through the existing
+  `OntologyResolver`; the agent is **wired as the resolver's LLM fallback**
+  (`make_ontology_fallback`, opt-in). The concrete Azure agent
+  (`agent/extraction.py`) bridges the async `agent-framework` API to the sync seam.
+  **`parce.agent.*` mypy exemption removed** — the whole of `src/parce` is now
+  type-checked. **Blocker:** live Azure extraction round-trip unverified (no
+  `AZURE_AI_PROJECT_ENDPOINT` in the headless env); deterministic GEO fetch/parse
+  verified live. *(GEO keyword `discover` via Entrez deferred to backlog — adapter
+  `discover` is identity on a `GSEnnnnn`, mirroring CELLxGENE's DOI identity.)*
 - [ ] **PR 6 — Cross-source KG merge.** Merge CELLxGENE + GEO into one graph
   linked through shared ontology entities; dedup; provenance on edges. Assert a
-  cross-source edge exists in tests.
+  cross-source edge exists in tests. *(Next up — see top of file.)*
 - [ ] **PR 7 — PRIDE proteomics adapter.** Second modality; prove the interface
   is modality-general. Adapter + extraction normalizer + integration test.
 - [ ] **PR 8 — KG export for modeling.** Serialize per-study context + sample
@@ -85,6 +94,9 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 - Graph database backend (Neo4j) vs. flat JSON export — revisit at PR 8.
 - Discovery agent: given a research theme, propose seed DOIs/accessions across
   repositories.
+- GEO keyword `discover` via Entrez `esearch`+`esummary` (the adapter's `discover`
+  is currently the identity on a `GSEnnnnn` accession). Pairs with the discovery
+  agent above.
 
 ---
 
@@ -92,6 +104,63 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
+
+### 2026-06-28 — PR 5: GEO extraction agent (vertical slice)
+
+- Branch `pr5-geo-extraction-agent` off **`origin/main`** (4dcd5b7).
+- **Stale-base catch (heeded the memory hazard):** the routine worktree's local
+  `main` was `64ed4f4`, two merges behind `origin/main` (PR 4 #7 + PR 4b #8). The
+  worktree's roadmap therefore showed PR 4 as "▶ Next up" — already merged.
+  `git fetch` + compare to `origin/main` caught it; rebased onto origin and did the
+  *real* next item (PR 5). Did **not** rebuild PR 4.
+- **New files.** `sources/geo.py` (`GeoAdapter` + SOFT parser), `normalize/geo.py`
+  (`GeoNormalizer` + `GeoExtraction`/`SampleExtraction` schemas), `agent/base.py`
+  (`StructuredExtractor` Protocol), `agent/extraction.py` (`AzureExtractionAgent` +
+  `make_ontology_fallback`). Tests: `test_geo_adapter.py`, `test_geo_normalize.py`,
+  `test_geo_integration.py` (marked).
+- **Design decisions (rationale):**
+  - **Deterministic vs LLM split.** GEO ships some fields structured (per-sample
+    `organism`, `supplementary_file`) — those are read straight from the record; the
+    LLM only parses the genuinely free-text `characteristics_ch1` into design
+    covariates and reads study-level assay/tissue/disease from the prose. Follows
+    "could a deterministic step do this? then do it" (CLAUDE.md).
+  - **Sample set is the record's, not the LLM's.** One `SampleNode` per real `GSM`;
+    the extraction is matched in by `sample_id`, so a dropped/hallucinated sample
+    can't change graph shape. Extraction failure degrades to samples-without-
+    covariates (logged), never a crash.
+  - **No `DatasetNode` for GEO.** A series *is* the study (data is per-sample suppl
+    files), so `assay`/`molecular_layer` live on `StudyNode` and design-context +
+    `HAS_SAMPLE` edges originate at the study. Merge (PR 6) keys on entity
+    `ontology_id` **targets**, so the differing origin vs CELLxGENE is fine.
+    Recorded in ARCHITECTURE §4.
+  - **No GEOparse dependency.** The fields needed are a handful of `!`-keys in SOFT
+    text; a ~40-line parser keeps deps minimal and the parse unit-testable. No dep
+    changes, so `uv.lock` untouched.
+  - **`discover` = identity on a `GSEnnnnn`** (mirrors CELLxGENE's DOI identity);
+    Entrez keyword search → backlog.
+  - **LLM boxed behind a sync `StructuredExtractor` seam** (`agent/base.py`); the
+    async `agent-framework` bridge lives only in `agent/extraction.py`. Normalizers
+    stay sync + offline-testable with a fake extractor. The agent is also wired as
+    the resolver's LLM fallback (`make_ontology_fallback`, accepts a result only if
+    the CURIE prefix matches the facet's ontology). ARCHITECTURE §3 updated.
+  - Added optional `ncbi_email`/`ncbi_api_key` settings (+ `.env.example`); passed
+    to the adapter, never read by it directly (keeps unit tests Settings-free).
+- **mypy:** removed the `parce.agent.*` override — **all of `src/parce` now
+  type-checked** (28 files; agent-framework/azure are untyped so the glue is `Any`
+  at the boundary, which is sound here).
+- **Gates green (hermetic — no `.env` in the worktree):** ruff check, ruff format
+  --check (47 files), mypy (28 files), **168 unit tests** (13 integration
+  deselected). Live `TestLiveGeoFetch` run against the real GEO endpoint — passes
+  (SOFT parser validated on `GSE10072`).
+- **BLOCKER (integration boundary, per protocol):** the live **Azure extraction**
+  round-trip is **unverified** — this headless env has `az login` but no
+  `AZURE_AI_PROJECT_ENDPOINT` configured (no worktree `.env`), so
+  `TestLiveGeoExtraction` skips. The Azure call shape mirrors the previously-working
+  `agent/curator.py` (`agent.run(prompt, response_format=Model)` → `result.value`).
+  **Next session with Azure creds:** run `uv run pytest -m integration
+  tests/test_geo_integration.py` to confirm the live extraction, before relying on
+  the GEO path in PR 6's cross-source merge.
+- **Next session:** PR 6 (cross-source KG merge) — see top of file.
 
 ### 2026-06-26 — PR 4b: Schema refinement (EFO assay term + stored molecular_layer)
 
