@@ -24,6 +24,7 @@ import json
 import logging
 from pathlib import Path
 
+from parce.graph import merge_subgraphs
 from parce.models.graph_schema import KnowledgeGraphOutput
 from parce.normalize.cellxgene import CellxgeneNormalizer
 from parce.sources.cellxgene import CellxgeneAdapter
@@ -93,12 +94,10 @@ def run(doi: str = _DEFAULT_DOI) -> None:
         return
 
     # ------------------------------------------------------------------
-    # Step 3: Persist the canonical KG.
+    # Step 3: Merge subgraphs (deduped by ontology ID) and persist.
     # ------------------------------------------------------------------
-    # PR 3 is single-source/single-study, so there is exactly one subgraph here.
-    # Merging multiple subgraphs into one graph (deduped by ontology ID) is PR 6.
-    logger.info("Step 3/3: Writing knowledge graph")
-    _persist(subgraphs[0])
+    logger.info("Step 3/3: Merging %d subgraph(s) and writing knowledge graph", len(subgraphs))
+    _persist(merge_subgraphs(subgraphs))
 
 
 def run_geo(accession: str) -> None:
@@ -144,8 +143,8 @@ def run_geo(accession: str) -> None:
         logger.error("No samples fetched for query=%s", accession)
         return
 
-    logger.info("Step 3/3: Writing knowledge graph")
-    _persist(subgraphs[0], filename=f"{accession.upper()}.json")
+    logger.info("Step 3/3: Merging %d subgraph(s) and writing knowledge graph", len(subgraphs))
+    _persist(merge_subgraphs(subgraphs), filename=f"{accession.upper()}.json")
 
 
 def main() -> None:

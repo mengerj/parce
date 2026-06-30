@@ -8,19 +8,20 @@ protocol and [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## ▶ Next up
 
-**PR 6 — Cross-source KG merge.** Merge per-study subgraphs from *different*
-sources (CELLxGENE + GEO) into one knowledge graph, deduped by ontology entity ID,
-with provenance preserved on edges. The shared-entity machinery already exists:
-both normalizers register `BiologicalEntityNode`s keyed by `ontology_id` and emit
-edges whose **targets** are those IDs (the originating node differs by source — see
-ARCHITECTURE §4 — but the merge keys on targets). Build the merger in `graph/`
-(reserved for exactly this since PR 3), take a list of `KnowledgeGraphOutput`
-subgraphs → one merged graph, dedup entities by `ontology_id`, keep all
-study/dataset/sample nodes, and carry source provenance so a shared entity records
-which studies touch it. **Assert a cross-source edge exists in tests** — e.g. a
-CELLxGENE study and a GEO study that both touch `UBERON:0002048` (lung) or a shared
-`MONDO:` disease become connected through that one entity node. Offline unit tests
-only (assemble two canned subgraphs and merge); no network.
+**PR 7 — PRIDE proteomics adapter.** Add a second *modality* to prove the
+adapter/normalizer interface is modality-general (not RNA-specific). Build a
+`PrideAdapter` (`sources/pride.py`) against the PRIDE/ProteomeXchange API
+(project + assay/SDRF metadata) and an extraction-backed `PrideNormalizer`
+(`normalize/pride.py`) emitting the canonical schema — design covariates only, no
+data-inferred annotations. Ground assay/instrument through the existing
+`OntologyResolver` (assay → EFO/OBI, MS specifics → **PSI-MS** per the registry;
+follow SDRF-Proteomics column→ontology conventions). The `molecular_layer`
+derivation must reach `PROTEOME` for MS proteomics — bare mass-spec EFO terms
+currently fall to `UNKNOWN` (PR 4b gotcha), so pin the anchor/keywords against
+live EFO/PSI-MS as part of this PR. Once a PRIDE subgraph lands, merging it via
+`graph.merge_subgraphs` should link it to CELLxGENE/GEO through any shared
+species/disease entity — assert a *cross-modality* shared entity in tests.
+Integration test marked (needs the live PRIDE API / Azure extraction).
 
 ---
 
@@ -78,11 +79,22 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
   `AZURE_AI_PROJECT_ENDPOINT` in the headless env); deterministic GEO fetch/parse
   verified live. *(GEO keyword `discover` via Entrez deferred to backlog — adapter
   `discover` is identity on a `GSEnnnnn`, mirroring CELLxGENE's DOI identity.)*
-- [ ] **PR 6 — Cross-source KG merge.** Merge CELLxGENE + GEO into one graph
-  linked through shared ontology entities; dedup; provenance on edges. Assert a
-  cross-source edge exists in tests. *(Next up — see top of file.)*
+- [x] **PR 6 — Cross-source KG merge.** Built the merger in `graph/`
+  (`graph/merge.py`): `merge_subgraphs(subgraphs) -> KnowledgeGraphOutput` dedups
+  biological entities by `ontology_id` (back-filling an `unknown` name from another
+  source; logging type clashes), keeps all study/dataset/sample nodes (deduped by
+  their own ID → idempotent), and **preserves all edges** (only exact duplicates
+  collapse). **Provenance is derived from the retained edges, not stored on a
+  node** (`entity_provenance` / `cross_source_entities`): an edge into an entity is
+  attributed to its owning study (itself for GEO study-level edges; via
+  `EXTRACTED_FROM` for CELLxGENE dataset edges; via `HAS_SAMPLE` for sample edges),
+  whose `source` gives the repo — so a shared entity records which studies/sources
+  touch it. Wired into `main.py` (both paths now persist `merge_subgraphs(...)`).
+  Cross-source test asserts a real CELLxGENE + GEO study sharing `UBERON:0002048`
+  (lung) + `NCBITaxon:9606` link through one node. Offline only.
 - [ ] **PR 7 — PRIDE proteomics adapter.** Second modality; prove the interface
   is modality-general. Adapter + extraction normalizer + integration test.
+  *(Next up — see top of file.)*
 - [ ] **PR 8 — KG export for modeling.** Serialize per-study context + sample
   manifest + data URIs in the form the downstream OQAE/model consumes.
 
@@ -104,6 +116,59 @@ Each PR is one branch, one focused scope, green CI, and a roadmap update.
 
 Newest first. One entry per working session: what changed, decisions made, and
 what the next session should know. Keep entries short and factual.
+
+### 2026-06-30 — PR 6: Cross-source KG merge
+
+- Branch `pr6-cross-source-merge` off **`origin/main`** (b1103d0).
+- **Stale-base catch (again — heed the memory hazard):** the routine worktree's
+  local `main` was `64ed4f4` (behind by PR 4 #7, 4b #8, 5 #9), so its roadmap
+  showed PR 4 as "▶ Next up". `git fetch` + compare to `origin/main` showed PR 5
+  merged and **PR 6 the real ▶ Next up**; branched off origin and did PR 6. No
+  open PRs in flight.
+- **New `graph/merge.py`** (stable core, fully mypy-checked):
+  - `merge_subgraphs(Iterable[KnowledgeGraphOutput]) -> KnowledgeGraphOutput`:
+    entities dedup by `ontology_id`; studies/datasets/samples dedup by their own
+    ID (cross-source IDs never collide — DOI vs `GSEnnnnn` — so this just makes the
+    merge idempotent); **edges preserved, only exact `(src,tgt,rel)` duplicates
+    collapse.** Order-preserving (first-seen wins).
+  - `_merge_entity` back-fills an `unknown`/empty entity name from another source
+    and logs a WARNING on an `entity_type` clash (keeps first).
+  - `entity_provenance(graph) -> {ontology_id: EntityProvenance(studies, sources)}`
+    and `cross_source_entities(graph)` (sources ≥ 2).
+- **Key design decision — provenance is DERIVED from edges, not stored on nodes.**
+  The roadmap said "provenance on edges"; I read that as *keep the edges intact*
+  (only entity **nodes** dedup), so each edge still records who touched a shared
+  entity. `entity_provenance` traces each entity edge to its owning study (study
+  itself for GEO study-level edges; via `EXTRACTED_FROM` for CELLxGENE dataset
+  edges; via `HAS_SAMPLE` for sample edges) → `StudyNode.source` gives the repo.
+  Rationale: storing a study-list on `BiologicalEntityNode` would denormalize and
+  could drift — exactly what PR 2's "containment is edge-only" decision rejected;
+  it would also touch the frozen `extra="forbid"` schema. **No schema change.**
+  Recorded in ARCHITECTURE §4.
+- **Wired into `main.py`:** both `run` and `run_geo` now persist
+  `merge_subgraphs(subgraphs)` (was `subgraphs[0]` with a stale "PR 6" TODO);
+  merging one subgraph is a near-identity so `test_orchestration` stays green.
+  *Note:* the CLI still runs one source per invocation (`parce cellxgene` **or**
+  `parce geo`); a single command that fetches multiple sources and merges across
+  them is later orchestration (logical fit: PR 8 export). The merger + its tests
+  are the PR 6 deliverable.
+- **Tests:** `tests/test_graph_merge.py` (20). Cross-source case runs the **real**
+  CELLxGENE + GEO normalizers (fake resolvers/extractor, offline) on two studies
+  that share lung `UBERON:0002048` + human `NCBITaxon:9606`, then asserts the
+  shared entity is one node touched by both sources (`{"CELLxGENE","GEO"}`) while
+  blood (cxg-only) stays single-source. Plus hand-built unit tests for dedup,
+  idempotency, edge preservation, name back-fill, type-clash logging, and
+  provenance owner-tracing across node kinds.
+- **Gates green incl. hermetic run (repo-root `.env` moved aside):** ruff check,
+  ruff format --check (49 files), mypy (**29** source files — `graph/merge.py`
+  added, no new exemptions), **188 unit tests** (was 168; 13 integration
+  deselected). No dep changes → `uv.lock` untouched.
+- **Next session:** PR 7 (PRIDE proteomics adapter) — second modality. Heads-up
+  carried from PR 4b: bare mass-spec EFO terms derive `molecular_layer=UNKNOWN`;
+  PR 7 must pin the `PROTEOME` anchor/keywords against live EFO/PSI-MS. Also the
+  PR 5 blocker stands: the **live Azure extraction round-trip is still unverified**
+  (no `AZURE_AI_PROJECT_ENDPOINT` in headless env) — confirm it before leaning on
+  any agent-backed source.
 
 ### 2026-06-28 — PR 5: GEO extraction agent (vertical slice)
 

@@ -144,6 +144,22 @@ Source-agnostic nodes (Pydantic v2, `extra="forbid"`). Implemented in PR 2 in
 Cross-source links are *emergent*: two studies share an edge target
 (`ontology_id`) rather than any source-specific key.
 
+**Cross-source merge (PR 6, `parce.graph.merge`).** `merge_subgraphs` combines the
+per-source subgraphs into one KG: biological entities dedup by `ontology_id` (one
+node per term; an `unknown` name back-filled from another source), while
+study/dataset/sample nodes and **all edges are kept** (only exact-duplicate edges
+collapse). Because an entity node is the *only* thing that merges, every edge that
+pointed at it survives and still records which study/dataset touched it — so
+"provenance on edges" is realized by edge *retention*, not by a new edge field.
+*Decision (PR 6): a shared entity's source provenance is **derived** from those
+retained edges (`entity_provenance` attributes each entity edge to its owning study
+— the study itself, or the study reached via `EXTRACTED_FROM`/`HAS_SAMPLE` — then
+to that study's `source`), never stored as a study-list on the
+`BiologicalEntityNode`.* Storing it on the node would denormalize a relationship the
+edges already own — the same drift trap the PR 2 "containment is edge-only" decision
+rejected — and would mutate the frozen `extra="forbid"` schema. PR 6 therefore added
+no schema fields.
+
 ## 5. Ontology grounding
 
 Every facet of an experiment is bound to **one designated ontology**, never a
